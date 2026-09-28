@@ -1,0 +1,11 @@
+# Text files are stored with LF line endings on every system.
+* text=auto eol=lf
+
+# Shaders are text.
+*.frag text
+*.glsl text
+
+# Binary files are never converted.
+*.png binary
+*.jpg binary
+*.ico binary

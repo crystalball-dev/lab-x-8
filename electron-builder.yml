@@ -1,0 +1,32 @@
+# Packaging of the desktop application. Run with: npm run dist
+appId: app.visualizer.desktop
+productName: Visualizer
+
+directories:
+  output: release
+  buildResources: build
+
+# The shell is bundled into dist-electron and the app into dist, so no node_modules are needed.
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - "!node_modules"
+  - "!**/*.map"
+
+# FFmpeg travels inside the app. Prepared by tools/prepare-ffmpeg.mjs.
+extraResources:
+  - from: vendor/ffmpeg
+    to: ffmpeg
+
+asar: true
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: dir
+      arch: [x64]
+
+# Optional single-file build: npm run dist -- --exe
+portable:
+  artifactName: Visualizer-portable.exe
