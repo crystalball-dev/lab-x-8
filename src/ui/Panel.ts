@@ -4,6 +4,7 @@ import { button, h } from '../util/dom';
 import { storage } from '../util/storage';
 import { createParamRow, type ParamRow } from './ParamRow';
 
+/** Named before the product was, and kept, so the saved layout carries over. */
 const OPEN_KEY = 'visualizer.panel.open.v1';
 /** Parameters whose value decides which controls are shown. */
 const STRUCTURAL = new Set(['layers.a', 'layers.b', 'color.palette']);

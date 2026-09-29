@@ -1,4 +1,5 @@
 import { AudioEngine, type SourceKind } from '../audio/AudioEngine';
+import { BRAND } from '../brand';
 import { BrowserSink, type BrowserDestination } from '../export/BrowserSink';
 import { FfmpegSink } from '../export/FfmpegSink';
 import { LiveRecorder } from '../export/LiveRecorder';
@@ -9,6 +10,7 @@ import { MAX_IMAGE_SIZE, Renderer, type ImageSource } from '../gfx/Renderer';
 import { PresetManager } from '../params/presets';
 import { createParamStore, parseResolution } from '../params/schema';
 import type { PresetData } from '../params/types';
+import { publisherLink, wordmark } from '../ui/brand';
 import { ExportDialog, type ExportRequest } from '../ui/ExportDialog';
 import { Header } from '../ui/Header';
 import { Hud, shortGpuName, type HudStats } from '../ui/Hud';
@@ -22,6 +24,7 @@ import { FrameClock } from './FrameClock';
 import { FrameStats } from './FrameStats';
 import { createTestCard } from './testCard';
 
+/** Named before the product was, and kept, so saved settings carry over. */
 const STATE_KEY = 'visualizer.state.v1';
 const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
 const IMAGE_TYPES = 'image/*';
@@ -71,17 +74,19 @@ export class App {
   constructor(root: HTMLElement) {
     this.restoreState();
 
-    this.canvas = h('canvas', { attrs: { 'aria-label': 'Visualizer output' } });
+    this.canvas = h('canvas', { attrs: { 'aria-label': `${BRAND.name} output` } });
     this.renderer = this.createRenderer();
     this.stats.gpu = shortGpuName(this.renderer.caps.renderer);
 
     this.startOverlay = h('div', { class: 'start', on: { click: () => this.selectSource('demo') } }, [
       h('div', { class: 'start-card' }, [
-        h('h1', { text: 'VISUALIZER' }),
+        wordmark('wordmark-xl'),
+        h('div', { class: 'tagline', text: BRAND.tagline }),
+        h('button', { class: 'btn primary start-button', text: 'Start', attrs: { type: 'button' } }),
         h('p', {
-          text: 'Click to start with the built-in demo loop, or choose an input in the panel. You can also drop an audio file or an image here.',
+          text: 'Starts the built-in demo loop. You can also choose an input in the panel, or drop an audio file or an image here.',
         }),
-        h('button', { class: 'btn primary', text: 'Start', attrs: { type: 'button' } }),
+        h('div', { class: 'credit' }, ['A product of ', publisherLink(BRAND.publisher)]),
       ]),
     ]);
     this.stage = h('div', { class: 'stage' }, [this.canvas, this.hud.element, this.startOverlay]);
@@ -278,10 +283,10 @@ export class App {
   }
 
   private exportPreset(): void {
-    const data: PresetData = { ...this.params.snapshot(), name: 'Visualizer preset' };
+    const data: PresetData = { ...this.params.snapshot(), name: `${BRAND.name} preset` };
     downloadBlob(
       new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
-      'visualizer-preset.json',
+      `${BRAND.slug}-preset.json`,
     );
   }
 

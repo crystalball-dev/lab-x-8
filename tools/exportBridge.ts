@@ -34,7 +34,7 @@ export function exportBridge(options: BridgePluginOptions = {}): Plugin {
   };
 
   return {
-    name: 'visualizer-export-bridge',
+    name: 'lab-x-8-export-bridge',
     configureServer(server) {
       install(server.middlewares, server.httpServer as Server | null);
     },

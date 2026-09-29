@@ -20,7 +20,7 @@ interface Host {
 }
 
 async function startHost(options: Partial<ExportBridgeOptions> = {}): Promise<Host> {
-  const dir = mkdtempSync(join(tmpdir(), 'visualizer-bridge-'));
+  const dir = mkdtempSync(join(tmpdir(), 'labx8-bridge-'));
   const written: string[] = [];
   const bridge = new ExportBridge({
     exportDir: join(dir, 'exports'),

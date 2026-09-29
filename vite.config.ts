@@ -6,8 +6,19 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    // Exported videos land in exports/. Watching them would reload the page mid-export.
-    watch: { ignored: ['**/exports/**'] },
+    watch: {
+      ignored: [
+        // Exported videos land here. Watching them would reload the page mid-export.
+        '**/exports/**',
+        // Build output and the desktop app's profile. On Windows a folder cannot be renamed
+        // while folders inside it are watched, so packaging would fail while the dev server runs.
+        '**/dist/**',
+        '**/release/**',
+        '**/dist-electron/**',
+        '**/vendor/**',
+        '**/.desktop-data/**',
+      ],
+    },
   },
   preview: { port: 5173, strictPort: true },
   build: {

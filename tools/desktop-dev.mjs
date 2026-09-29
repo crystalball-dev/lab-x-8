@@ -16,7 +16,7 @@ console.log(`Development server: ${url}`);
 
 const child = spawn(String(electron), ['.', ...process.argv.slice(2)], {
   stdio: 'inherit',
-  env: { ...process.env, VISUALIZER_DEV_SERVER: url },
+  env: { ...process.env, LABX8_DEV_SERVER: url },
 });
 child.on('exit', async (code) => {
   await vite.close();

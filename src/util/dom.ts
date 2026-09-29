@@ -47,6 +47,14 @@ export function button(
   });
 }
 
+/** Publishes a range input's position as `--fill`, 0 to 1, which the stylesheet draws as a bar. */
+export function syncRangeFill(input: HTMLInputElement): void {
+  const min = Number(input.min || 0);
+  const max = Number(input.max || 100);
+  const position = max > min ? (Number(input.value) - min) / (max - min) : 0;
+  input.style.setProperty('--fill', position.toFixed(4));
+}
+
 /** Opens the system file picker and resolves with the chosen file, or null when cancelled. */
 export function pickFile(accept: string): Promise<File | null> {
   return new Promise((resolve) => {

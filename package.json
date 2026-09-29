@@ -1,10 +1,19 @@
 {
-  "name": "visualizer",
-  "productName": "Visualizer",
+  "name": "lab-x-8",
+  "productName": "Lab X-8",
   "private": true,
   "version": "0.1.0",
-  "description": "Sound-reactive rave visualizer: CRT-synthesis grit meets generative geometry. WebGL2 + Web Audio + WebCodecs.",
-  "author": "Visualizer",
+  "description": "Lab X-8: sound-reactive visual synthesis for rave, EDM and drum and bass. By OPERATION FAIRWAY, LLC.",
+  "author": {
+    "name": "OPERATION FAIRWAY, LLC",
+    "url": "https://operationfairway.org"
+  },
+  "homepage": "https://operationfairway.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/crystalball-dev/visualizer.git"
+  },
+  "license": "UNLICENSED",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -16,6 +25,7 @@
     "desktop": "npm run build && node tools/build-desktop.mjs && electron .",
     "desktop:dev": "node tools/desktop-dev.mjs",
     "ffmpeg": "node tools/prepare-ffmpeg.mjs",
+    "icon": "node tools/make-icon.mjs",
     "dist": "node tools/dist.mjs"
   },
   "dependencies": {

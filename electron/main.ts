@@ -13,18 +13,21 @@ import {
   desktopCapturer,
   dialog,
   ipcMain,
+  nativeImage,
   screen,
   session,
   shell,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
+  type MessageBoxOptions,
 } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { ExportBridge } from '../bridge/ExportBridge';
 import { ALLOWED_EXTENSIONS } from '../bridge/codecs';
+import { BRAND } from '../src/brand';
 import { CHANNEL, type ShellInfo } from './channels';
 import { resolvePaths } from './paths';
 import { startServer, type AppServer } from './server';
@@ -32,6 +35,7 @@ import { SettingsFile, type WindowState } from './settings';
 
 const LAST_EXPORT_DIR = 'desktop.lastExportDir';
 const DEFAULT_WINDOW: WindowState = { width: 1600, height: 900, maximized: false };
+const PUBLISHER_HOST = new URL(BRAND.website).hostname;
 
 // Rendering must never slow down because the window is covered, minimized or out of focus.
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -63,10 +67,54 @@ function log(message: string, error?: unknown): void {
   const line = `${new Date().toISOString()} ${message} ${detail}`.trim();
   console.error(line);
   try {
-    appendFileSync(join(paths.dataDir, 'visualizer.log'), `${line}\n`);
+    appendFileSync(join(paths.dataDir, `${BRAND.slug}.log`), `${line}\n`);
   } catch {
     // The log is a convenience. Failing to write it must not stop the app.
   }
+}
+
+/** The app icon as a file. A packaged app carries it in the web app, a development run in build/. */
+function iconFile(): string {
+  return app.isPackaged ? join(paths.webRoot, 'icon.png') : join(app.getAppPath(), 'build', 'icon.png');
+}
+
+/** True for pages of the publisher's website, the only place the app links to. */
+function isPublisherSite(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === 'https:' && (hostname === PUBLISHER_HOST || hostname === `www.${PUBLISHER_HOST}`);
+  } catch {
+    return false;
+  }
+}
+
+function openWebsite(): void {
+  void shell.openExternal(BRAND.website);
+}
+
+function showAbout(): void {
+  const icon = nativeImage.createFromPath(iconFile());
+  const options: MessageBoxOptions = {
+    type: 'none',
+    title: `About ${BRAND.name}`,
+    message: `${BRAND.name}  ${app.getVersion()}`,
+    detail: [
+      `${BRAND.tagline} for rave, EDM and drum and bass.`,
+      '',
+      `${BRAND.copyright}. All rights reserved.`,
+      `${BRAND.publisherNote}.`,
+      BRAND.websiteLabel,
+    ].join('\n'),
+    buttons: ['Close', `Open ${BRAND.websiteLabel}`],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    icon: icon.isEmpty() ? undefined : icon,
+  };
+  const shown = window ? dialog.showMessageBox(window, options) : dialog.showMessageBox(options);
+  void shown.then(({ response }) => {
+    if (response === 1) openWebsite();
+  });
 }
 
 /** True when a message really comes from the app's own page. */
@@ -205,10 +253,11 @@ function createWindow(origin: string): void {
     minWidth: 960,
     minHeight: 600,
     show: false,
-    backgroundColor: '#07080a',
-    title: 'Visualizer',
+    backgroundColor: '#06020c',
+    title: BRAND.name,
     autoHideMenuBar: true,
-    icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.png'),
+    // A packaged app shows the icon built into its executable.
+    icon: app.isPackaged ? undefined : iconFile(),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -222,11 +271,15 @@ function createWindow(origin: string): void {
   if (state.maximized) created.maximize();
   created.once('ready-to-show', () => created.show());
 
-  // The window shows the app and nothing else.
+  // The window shows the app and nothing else. Links to the publisher's website open in the
+  // system browser.
   created.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith(`${origin}/`)) event.preventDefault();
   });
-  created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  created.webContents.setWindowOpenHandler(({ url }) => {
+    if (isPublisherSite(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   created.webContents.on('render-process-gone', (_event, details) => {
     log(`The page stopped (${details.reason}).`);
@@ -269,6 +322,13 @@ function createMenu(): void {
         { role: 'togglefullscreen' },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        { label: `About ${BRAND.name}`, click: showAbout },
+        { label: `${BRAND.publisherShort} website`, click: openWebsite },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -281,7 +341,7 @@ async function start(): Promise<void> {
     claimOutputPath: (path) => approvedPaths.delete(resolve(path)),
     onFileWritten: (path) => writtenFiles.add(resolve(path)),
   });
-  const devServer = process.env.VISUALIZER_DEV_SERVER;
+  const devServer = process.env.LABX8_DEV_SERVER;
   server = await startServer({
     bridge,
     webRoot: paths.webRoot,
@@ -328,7 +388,7 @@ if (!app.requestSingleInstanceLock()) {
     .catch((error: unknown) => {
       log('The app could not start.', error);
       dialog.showErrorBox(
-        'Visualizer could not start',
+        `${BRAND.name} could not start`,
         error instanceof Error ? error.message : String(error),
       );
       app.exit(1);

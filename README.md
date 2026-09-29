@@ -1,8 +1,19 @@
-# Visualizer
+<p align="center">
+  <img src="build/icon.png" width="112" alt="Lab X-8 icon">
+</p>
 
-A sound-reactive visualizer for rave, EDM and drum and bass visuals. The look sits between
-degraded CRT video synthesis and clean generative geometry: glowing patterns driven by the
-music, pushed through video feedback, digital corruption and a worn analog monitor.
+<h1 align="center">LAB X-8</h1>
+
+<p align="center">
+  <b>Sound-reactive visual synthesis for rave, EDM and drum and bass.</b><br>
+  A product of <a href="https://operationfairway.org">OPERATION FAIRWAY, LLC</a>
+</p>
+
+![Lab X-8 playing the built-in demo loop](docs/app.jpg)
+
+Lab X-8 turns music into visuals in real time. The look sits between degraded CRT video
+synthesis and clean generative geometry: glowing patterns driven by the music, pushed through
+video feedback, digital corruption and a worn analog monitor.
 
 It runs in real time at 1920 x 1080 (and above), takes live audio or audio files, can use your
 own image as a layer, and renders finished video files for VJ sets or standalone content.
@@ -17,23 +28,23 @@ Bottom: Signal Loss, Clean Geometry, Acid Mandala.
 The portable build is a folder. It needs nothing installed: no Node, no browser, no FFmpeg.
 
 ```
-release/Visualizer/Visualizer.exe
+release/Lab X-8/Lab X-8.exe
 ```
 
-Double-click it and press **Start**. Copy the whole `Visualizer` folder to move the app to
+Double-click it and press **Start**. Copy the whole `Lab X-8` folder to move the app to
 another machine or a USB stick.
 
 | What | Where |
 | --- | --- |
-| Settings and presets | `Visualizer Data/settings.json`, next to the program |
+| Settings and presets | `Lab X-8 Data/settings.json`, next to the program |
 | Exported video | `Exports/`, next to the program, or any place you choose when exporting |
 | FFmpeg | `resources/ffmpeg/`, inside the program |
 
 When the folder is read-only, for example under Program Files, settings go to your user
-profile and exports to your Videos folder instead.
+profile and exports to `Videos/Lab X-8` instead.
 
-To use another FFmpeg, put `ffmpeg.exe` next to `Visualizer.exe`. It takes precedence over
-the one inside.
+To use another FFmpeg, put `ffmpeg.exe` next to `Lab X-8.exe`. It takes precedence over the
+one inside.
 
 ### Building it
 
@@ -45,14 +56,14 @@ npm install
 npm run dist
 ```
 
-This builds `release/Visualizer/`. Rebuilding updates the program and keeps the settings and
+This builds `release/Lab X-8/`. Rebuilding updates the program and keeps the settings and
 exports stored in that folder. Close the app before rebuilding.
 
 | Command | Result |
 | --- | --- |
 | `npm run dist` | The folder |
-| `npm run dist -- --zip` | The folder, and a zip archive of it for handing on |
-| `npm run dist -- --exe` | The folder, and a single-file build |
+| `npm run dist -- --zip` | The folder, and `Lab-X-8-portable.zip` for handing on |
+| `npm run dist -- --exe` | The folder, and `Lab-X-8-portable.exe`, a single-file build |
 
 The single file is slow to start because it unpacks itself on every launch. Use the folder.
 
@@ -136,7 +147,8 @@ After the patterns, the picture passes through these stages, in this order:
 | CRT | Sync errors, colour bleed, scanlines, phosphor mask, tube curvature |
 | Output | Tone mapping and final encoding |
 
-Setting a stage's main amount to zero bypasses it completely.
+Setting a stage's main amount to zero bypasses it completely. Each section of the control
+panel has its own colour, so you can tell at a glance which stage a slider belongs to.
 
 ### Image
 
@@ -147,7 +159,8 @@ walls: choose the pattern "Image walls" in the Tunnel generator.
 ### Letting the audio drive a parameter
 
 Every slider of the look has a small button at its right end. Click it, choose a source and a
-depth. The pink marker on the slider shows the live value.
+depth. Modulated parameters turn acid green, and the green marker on the slider shows the
+live value.
 
 Sources: level, six frequency bands, kick, snare, hat, any onset, beat pulse, beat ramp,
 bar pulse, bar ramp, and two free-running LFOs.
@@ -229,7 +242,7 @@ Export speed in the desktop application, for 1080p at 60 frames per second:
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dist` | Builds the portable desktop application into `release/Visualizer/` |
+| `npm run dist` | Builds the portable desktop application into `release/Lab X-8/` |
 | `npm run desktop` | Builds and starts the desktop application without packaging it |
 | `npm run desktop:dev` | Desktop application with shader hot reload |
 | `npm run dev` | Browser development server with shader hot reload |
@@ -237,6 +250,7 @@ Export speed in the desktop application, for 1080p at 60 frames per second:
 | `npm run preview` | Serves the production build in a browser |
 | `npm test` | Unit tests |
 | `npm run typecheck` | Type check only |
+| `npm run icon` | Redraws the app icon from `tools/make-icon.mjs` |
 
 ## Adding an effect
 
@@ -254,11 +268,12 @@ src/
   gfx/        WebGL2 renderer, render targets, shader library
   params/     parameter store, modulation, palettes, presets
   export/     offline renderer, encoders, live recorder
-  ui/         control panel, header, export dialog, statistics
+  ui/         control panel, header, export dialog, statistics, styles
   platform/   what the app may ask of the desktop shell
+  brand.ts    product name, publisher and website, in one place
 electron/     desktop shell: window, private server, settings file, permissions
 bridge/       link to FFmpeg and to disk, shared by the shell and the dev server
-tools/        build and packaging scripts
+tools/        build, packaging and icon scripts
 tests/        unit tests
 docs/         architecture
 ```
@@ -274,3 +289,14 @@ docs/         architecture
   Graphics drivers re-optimise shaders in the background, which can change isolated pixels by
   one step out of 255.
 - Offline export needs a track. A live input can only be recorded in real time.
+
+## About
+
+Lab X-8 is developed and published by **OPERATION FAIRWAY, LLC**, a record label registered
+in the State of Alaska. [operationfairway.org](https://operationfairway.org)
+
+Copyright © 2026 OPERATION FAIRWAY, LLC. All rights reserved.
+
+The desktop build includes third-party software under its own licences: Electron and
+Chromium (licence files in the program folder), FFmpeg (GPL, in `resources/ffmpeg/`) and
+Mediabunny (MPL-2.0, https://github.com/Vanilagy/mediabunny).

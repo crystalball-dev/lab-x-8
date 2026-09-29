@@ -1,3 +1,5 @@
+import { BRAND } from '../brand';
+
 /** Draws a broadcast style test card. A ready-made image for trying the image layer. */
 export function createTestCard(width = 1920, height = 1080): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
@@ -62,13 +64,13 @@ export function createTestCard(width = 1920, height = 1080): HTMLCanvasElement {
   g.fillStyle = '#ffffff';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.font = `700 ${84 * u}px ui-monospace, Consolas, monospace`;
-  g.fillText('VISUALIZER', cx, cy - 60 * u);
+  g.font = `700 ${96 * u}px Bahnschrift, 'Arial Narrow', ui-monospace, Consolas, monospace`;
+  g.fillText(BRAND.name.toUpperCase(), cx, cy - 60 * u);
   g.font = `400 ${38 * u}px ui-monospace, Consolas, monospace`;
-  g.fillStyle = '#00ffa3';
+  g.fillStyle = '#19e6c1';
   g.fillText('TEST CARD  1920 x 1080', cx, cy + 30 * u);
   g.fillStyle = '#ff2bd6';
-  g.fillText('CH 03   PAL / NTSC', cx, cy + 90 * u);
+  g.fillText(BRAND.publisherShort, cx, cy + 90 * u);
 
   return canvas;
 }

@@ -1,6 +1,7 @@
 import type { AudioEngine, EngineState, SourceKind } from '../audio/AudioEngine';
 import type { PresetManager } from '../params/presets';
-import { button, formatTime, h } from '../util/dom';
+import { button, formatTime, h, syncRangeFill } from '../util/dom';
+import { publisherLink, wordmark } from './brand';
 
 export interface HeaderActions {
   selectSource(kind: Exclude<SourceKind, 'none'>): void;
@@ -32,8 +33,10 @@ export class Header {
   });
   private readonly recordButton: HTMLButtonElement;
   private readonly deleteButton: HTMLButtonElement;
+  private readonly logo = wordmark();
   private seeking = false;
   private frame = 0;
+  private kick = 0;
 
   constructor(
     private readonly audio: AudioEngine,
@@ -51,6 +54,7 @@ export class Header {
     this.deleteButton = button('Delete', () => actions.deletePreset(this.presetSelect.value));
 
     this.seek.addEventListener('pointerdown', () => (this.seeking = true));
+    this.seek.addEventListener('input', () => syncRangeFill(this.seek));
     this.seek.addEventListener('change', () => {
       this.seeking = false;
       audio.seek(Number(this.seek.value) * audio.state.duration);
@@ -73,7 +77,10 @@ export class Header {
     });
 
     this.element = h('div', { class: 'panel-head' }, [
-      h('div', { class: 'brand' }, ['VISUALIZER', h('small', { text: 'H hides this panel' })]),
+      h('div', { class: 'brand' }, [
+        this.logo,
+        h('div', { class: 'brand-meta' }, [publisherLink(), h('small', { text: 'H hides this panel' })]),
+      ]),
       h('div', { class: 'button-row' }, [
         source('demo', 'Demo', 'Built-in 174 BPM loop'),
         source('file', 'File', 'Play an audio file'),
@@ -132,12 +139,22 @@ export class Header {
     this.recordButton.textContent = value ? 'Stop' : 'Record';
   }
 
-  /** Moves the position indicator. Called every frame, acts a few times per second. */
+  /** Flashes the logo with the kick drum and moves the position indicator. Called every frame. */
   tick(): void {
+    // Steps of 0.05 keep the style untouched while nothing audible changes.
+    const kick = Math.round(Math.min(1, this.audio.features.kick) * 20) / 20;
+    if (kick !== this.kick) {
+      this.kick = kick;
+      this.logo.style.setProperty('--kick', String(kick));
+    }
+
     if (this.frame++ % 10 !== 0) return;
     const state = this.audio.state;
     if (state.duration > 0) {
-      if (!this.seeking) this.seek.value = String(state.position / state.duration);
+      if (!this.seeking) {
+        this.seek.value = String(state.position / state.duration);
+        syncRangeFill(this.seek);
+      }
       this.trackTime.textContent = `${formatTime(state.position)} / ${formatTime(state.duration)}`;
     }
   }
@@ -155,9 +172,11 @@ export class Header {
     this.seek.disabled = !isTrack;
     this.trackName.textContent = state.kind === 'none' ? 'No audio' : state.label;
     this.trackName.title = state.label;
+    this.trackTime.classList.toggle('live', !isTrack && state.kind !== 'none');
     if (!isTrack) {
       this.trackTime.textContent = state.kind === 'none' ? '' : 'live';
       this.seek.value = '0';
+      syncRangeFill(this.seek);
     }
   }
 }

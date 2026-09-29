@@ -1,6 +1,6 @@
 import type { ParamStore } from '../params/ParamStore';
 import { MOD_SOURCES, type FloatDef, type IntDef, type ModSourceId, type ParamDef } from '../params/types';
-import { h } from '../util/dom';
+import { h, syncRangeFill } from '../util/dom';
 
 /** A generated control for one parameter. */
 export interface ParamRow {
@@ -75,12 +75,14 @@ function numberRow(params: ParamStore, path: string, def: FloatDef | IntDef): Pa
   const refresh = (): void => {
     const stored = params.get(path) as number;
     slider.value = String(stored);
+    syncRangeFill(slider);
     if (document.activeElement !== value) value.value = stored.toFixed(digits);
     const mod = params.getMod(path);
     row.classList.toggle('modulated', mod !== null);
     modButton.textContent = mod ? sourceShort(mod.source) : '~';
     sourceSelect.value = mod?.source ?? 'none';
     amount.value = String(mod?.amount ?? 0);
+    syncRangeFill(amount);
     amountText.textContent = (mod?.amount ?? 0).toFixed(2);
   };
 

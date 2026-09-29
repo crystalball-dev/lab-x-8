@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { accessSync, constants, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { BRAND } from '../src/brand';
 
 export interface AppPaths {
   /** True when the app keeps its data next to the executable and can be carried around. */
@@ -37,7 +38,7 @@ function usable(dir: string): boolean {
  * user's profile.
  */
 export function resolvePaths(): AppPaths {
-  const override = process.env.VISUALIZER_FFMPEG;
+  const override = process.env.LABX8_FFMPEG;
   const candidates = override ? [override] : [];
 
   if (!app.isPackaged) {
@@ -53,13 +54,13 @@ export function resolvePaths(): AppPaths {
 
   // A single-file portable build unpacks to a temporary folder and names its real home here.
   const home = process.env.PORTABLE_EXECUTABLE_DIR ?? dirname(app.getPath('exe'));
-  const beside = join(home, 'Visualizer Data');
+  const beside = join(home, `${BRAND.name} Data`);
   const portable = usable(beside);
 
   return {
     portable,
     dataDir: portable ? beside : app.getPath('userData'),
-    exportDir: portable ? join(home, 'Exports') : join(app.getPath('videos'), 'Visualizer'),
+    exportDir: portable ? join(home, 'Exports') : join(app.getPath('videos'), BRAND.name),
     webRoot: join(app.getAppPath(), 'dist'),
     ffmpegCandidates: [
       ...candidates,

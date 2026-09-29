@@ -1,6 +1,7 @@
 # Packaging of the desktop application. Run with: npm run dist
-appId: app.visualizer.desktop
-productName: Visualizer
+appId: org.operationfairway.labx8
+productName: Lab X-8
+copyright: Copyright © 2026 OPERATION FAIRWAY, LLC
 
 directories:
   output: release
@@ -29,4 +30,4 @@ win:
 
 # Optional single-file build: npm run dist -- --exe
 portable:
-  artifactName: Visualizer-portable.exe
+  artifactName: Lab-X-8-portable.exe

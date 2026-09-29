@@ -6,15 +6,16 @@
  * on the PATH, and offers only the built-in encoders when there is none.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+const { productName } = JSON.parse(readFileSync('package.json', 'utf8'));
 const windows = process.platform === 'win32';
 const name = windows ? 'ffmpeg.exe' : 'ffmpeg';
 const target = join('vendor', 'ffmpeg');
 
 function locate() {
-  const explicit = process.env.VISUALIZER_FFMPEG;
+  const explicit = process.env.LABX8_FFMPEG;
   if (explicit && existsSync(explicit)) return explicit;
   const found = spawnSync(windows ? 'where' : 'which', ['ffmpeg'], { encoding: 'utf8' });
   const first = (found.stdout ?? '').split(/\r?\n/).find((line) => line.trim().length > 0);
@@ -60,14 +61,14 @@ for (const folder of [dirname(source), dirname(dirname(source))]) {
 writeFileSync(
   join(target, 'ABOUT.txt'),
   [
-    'FFmpeg, bundled with Visualizer for video export.',
+    `FFmpeg, bundled with ${productName} for video export.`,
     '',
     banner,
     `Copied from: ${source}`,
     `Licence:     ${licence}`,
     '',
     'FFmpeg is a separate program under its own licence (see LICENSE.txt).',
-    'Visualizer starts it as a separate process and does not link against it.',
+    `${productName} starts it as a separate process and does not link against it.`,
     'Source code: https://ffmpeg.org/download.html',
     '',
   ].join('\n'),

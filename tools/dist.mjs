@@ -1,5 +1,5 @@
 /**
- * Builds the portable desktop application into release/Visualizer/.
+ * Builds the portable desktop application into release/<product name>/.
  *
  *   npm run dist            the folder, with FFmpeg inside
  *   npm run dist -- --zip   the folder, plus a zip archive of it for handing on
@@ -12,14 +12,19 @@
  * to itself are kept, so rebuilding never loses work.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+
+/** "Lab X-8". Names the program, its folder and the folder it keeps its data in. */
+const { productName } = JSON.parse(readFileSync('package.json', 'utf8'));
+/** "Lab-X-8". The name in file names meant for handing on. */
+const fileStem = productName.replace(/\s+/g, '-');
 
 const RELEASE = 'release';
 const BUILT = join(RELEASE, 'win-unpacked');
-const TARGET = join(RELEASE, 'Visualizer');
+const TARGET = join(RELEASE, productName);
 /** What the app writes next to itself. Never deleted by a rebuild. */
-const KEEP = new Set(['Visualizer Data', 'Exports']);
+const KEEP = new Set([`${productName} Data`, 'Exports']);
 
 /** Runs a command line through the shell, which is what finds npm and npx on Windows. */
 function run(commandLine) {
@@ -47,16 +52,16 @@ const singleFile = process.argv.includes('--exe');
 run(`npx electron-builder --win dir${singleFile ? ' portable' : ''} --x64 --config electron-builder.yml`);
 
 // The fresh build moves to a staging folder that carries the final name, so the archive
-// unpacks to a folder called Visualizer.
+// unpacks to a folder named after the product.
 const STAGE = join(RELEASE, '.stage');
-const staged = join(STAGE, 'Visualizer');
+const staged = join(STAGE, productName);
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
 renameSync(BUILT, staged);
 rmSync(join(RELEASE, 'builder-debug.yml'), { force: true });
 
 if (process.argv.includes('--zip')) {
-  const archive = join(RELEASE, 'Visualizer-portable.zip');
+  const archive = join(RELEASE, `${fileStem}-portable.zip`);
   rmSync(archive, { force: true });
   // Made from the fresh build, before it meets this machine's settings and exports.
   run(
@@ -84,14 +89,15 @@ rmSync(STAGE, { recursive: true, force: true });
 
 const megabytes = (folderSize(TARGET) / 1e6).toFixed(0);
 console.log(`\nPortable app: ${TARGET}  (${megabytes} MB)`);
-console.log(`Start it with ${join(TARGET, 'Visualizer.exe')}`);
+console.log(`Start it with ${join(TARGET, `${productName}.exe`)}`);
 
 if (singleFile) {
-  const file = join(RELEASE, 'Visualizer-portable.exe');
+  // Named in electron-builder.yml.
+  const file = join(RELEASE, `${fileStem}-portable.exe`);
   console.log(`Single file: ${file}  (${(statSync(file).size / 1e6).toFixed(0)} MB)`);
 }
 
 if (!existsSync(join(TARGET, 'resources', 'ffmpeg'))) {
   console.warn('\nFFmpeg is not inside the app. Exports are limited to the built-in encoders');
-  console.warn('unless FFmpeg is on the PATH or placed next to Visualizer.exe.');
+  console.warn(`unless FFmpeg is on the PATH or placed next to ${productName}.exe.`);
 }

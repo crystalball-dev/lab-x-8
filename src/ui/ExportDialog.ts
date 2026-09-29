@@ -1,3 +1,4 @@
+import { BRAND } from '../brand';
 import { BROWSER_CODECS, browserFileExtension, probeBrowserCodecs } from '../export/BrowserSink';
 import { probeBridge, type BridgeInfo } from '../export/bridge';
 import {
@@ -97,7 +98,7 @@ export class ExportDialog {
     );
     this.fps.value = '60';
     this.audio.checked = true;
-    this.name.value = 'visualizer';
+    this.name.value = BRAND.slug;
 
     this.renderButton = button('Render', () => void this.render(), 'primary');
     this.closeButton = button('Close', () => this.close());
@@ -272,7 +273,7 @@ export class ExportDialog {
     const { width, height } = parseResolution(this.resolution.value);
     const start = Math.min(Math.max(0, Number(this.start.value) || 0), this.duration - 0.1);
     const length = Math.min(Math.max(0.1, Number(this.length.value) || this.duration), this.duration - start);
-    const name = this.name.value.trim().replace(/[^\w.\- ]+/g, '_') || 'visualizer';
+    const name = this.name.value.trim().replace(/[^\w.\- ]+/g, '_') || BRAND.slug;
     return {
       width,
       height,

@@ -4,6 +4,7 @@
  * Use it to capture a performance driven by a live input, where an offline render is not
  * possible. For tracks, the offline export gives better quality and never drops frames.
  */
+import { BRAND } from '../brand';
 
 const MIME_CANDIDATES = [
   'video/mp4;codecs=avc1.640033,mp4a.40.2',
@@ -86,7 +87,7 @@ export class LiveRecorder {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         resolve({
           blob: new Blob(this.chunks, { type }),
-          fileName: `visualizer-live-${stamp}.${extension}`,
+          fileName: `${BRAND.slug}-live-${stamp}.${extension}`,
           seconds,
         });
         this.chunks = [];

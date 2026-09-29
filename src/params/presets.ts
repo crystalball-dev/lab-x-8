@@ -1,7 +1,9 @@
+import { BRAND } from '../brand';
 import { storage } from '../util/storage';
 import type { ParamStore } from './ParamStore';
 import type { PresetData } from './types';
 
+/** Named before the product was, and kept, so saved presets carry over. */
 const STORAGE_KEY = 'visualizer.presets.v1';
 
 export interface Preset {
@@ -233,7 +235,7 @@ export class PresetManager {
   importJson(text: string): PresetData {
     const data = JSON.parse(text) as PresetData;
     if (!data || typeof data !== 'object' || typeof data.values !== 'object') {
-      throw new Error('This file is not a visualizer preset.');
+      throw new Error(`This file is not a ${BRAND.name} preset.`);
     }
     this.params.load(data);
     return data;

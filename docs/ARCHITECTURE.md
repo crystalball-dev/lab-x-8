@@ -1,4 +1,4 @@
-# Architecture
+# Lab X-8 architecture
 
 ## Stack
 
@@ -53,7 +53,7 @@ exception: `src/platform/desktop.ts` describes what it may ask of the shell, and
 browser. Everything the shell provides sits behind that one interface.
 
 ```
- Visualizer.exe
+ Lab X-8.exe
  ├─ main process (electron/main.ts)
  │    ├─ private server on 127.0.0.1, random port (electron/server.ts)
  │    │     ├─ serves the built app
@@ -99,7 +99,7 @@ The page is treated as untrusted even though it is the app's own code.
 | Message sender check | The main process ignores messages from any frame that is not the app |
 | Content security policy | Scripts, styles and connections from the app itself only. No `eval` |
 | Permissions | Audio input, display capture and fullscreen. Everything else is denied, including the camera |
-| Navigation | The window cannot leave the app or open other windows |
+| Navigation | The window cannot leave the app or open other windows. Links to the publisher's website open in the system browser, nothing else does |
 | File types | The bridge writes `.mp4`, `.mov`, `.webm` and `.mkv` only |
 
 ### Packaging
@@ -111,8 +111,14 @@ The page is treated as untrusted even though it is the app's own code.
    the packaged app has no `node_modules`.
 3. Copies the machine's FFmpeg and its licence into `vendor/ffmpeg/`.
 4. Packages with electron-builder.
-5. Moves the result into `release/Visualizer/`, leaving `Visualizer Data/` and `Exports/`
+5. Moves the result into `release/Lab X-8/`, leaving `Lab X-8 Data/` and `Exports/`
    in place.
+
+The folder names follow `productName` in `package.json`. The app reads the same name, with the
+publisher and website, from `src/brand.ts`, and a unit test keeps the two in step.
+
+The icon is drawn by `tools/make-icon.mjs` (`npm run icon`) from distance functions, one pass
+per size, so the small sizes in the taskbar are drawn for their size rather than scaled down.
 
 ## Data flow
 
@@ -357,6 +363,7 @@ Its shader reads the previous stage from `u_input`.
 | `tests/frameStats.test.ts` | Frame rate and late-frame measurement |
 | `tests/bridge.test.ts` | Token and origin checks, approved paths, out-of-order writes, cancelling, a real FFmpeg encode |
 | `tests/desktop.test.ts` | Settings file, private server, path traversal, content security policy, development proxy |
+| `tests/brand.test.ts` | Product name and publisher agree between the app, `package.json` and the packaging |
 
 Rendering and export were verified by running the app: frame captures of every generator,
 stage and preset, and FFprobe checks of every export codec.
