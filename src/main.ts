@@ -7,7 +7,7 @@ const root = document.getElementById('app')!;
 try {
   const app = new App(root);
   // Exposed for debugging from the browser console.
-  (window as unknown as { visualizer: App }).visualizer = app;
+  (window as unknown as { labx8: App }).labx8 = app;
 } catch (error) {
   console.error(error);
   root.append(

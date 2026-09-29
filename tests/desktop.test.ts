@@ -11,7 +11,7 @@ import { SettingsFile } from '../electron/settings';
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'labx8-desktop-'));
+  dir = mkdtempSync(join(tmpdir(), 'lab-x-8-desktop-'));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });

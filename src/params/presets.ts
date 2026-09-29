@@ -3,8 +3,7 @@ import { storage } from '../util/storage';
 import type { ParamStore } from './ParamStore';
 import type { PresetData } from './types';
 
-/** Named before the product was, and kept, so saved presets carry over. */
-const STORAGE_KEY = 'visualizer.presets.v1';
+const STORAGE_KEY = 'lab-x-8.presets.v1';
 
 export interface Preset {
   id: string;

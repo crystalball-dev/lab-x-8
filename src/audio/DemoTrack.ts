@@ -2,7 +2,7 @@ import { createRng } from '../util/math';
 
 /**
  * Synthesizes the built-in demo loop: eight bars of drum and bass at any tempo.
- * It exists so the visualizer has something to react to before any audio is loaded,
+ * It exists so the app has something to react to before any audio is loaded,
  * and so exports can be tested without a music file. Rendering is deterministic.
  */
 

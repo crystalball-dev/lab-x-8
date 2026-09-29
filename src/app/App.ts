@@ -24,8 +24,7 @@ import { FrameClock } from './FrameClock';
 import { FrameStats } from './FrameStats';
 import { createTestCard } from './testCard';
 
-/** Named before the product was, and kept, so saved settings carry over. */
-const STATE_KEY = 'visualizer.state.v1';
+const STATE_KEY = 'lab-x-8.state.v1';
 const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
 const IMAGE_TYPES = 'image/*';
 /** Parameter groups that Randomize leaves alone. */
