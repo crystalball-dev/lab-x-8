@@ -1,6 +1,6 @@
 import { GENERATORS } from '../effects/generators';
 import { onShadersChanged, type HotShader } from '../effects/hot';
-import { STAGES } from '../effects/stages';
+import { IMAGE_LAYERS, STAGES } from '../effects/stages';
 import type { ParamStore } from '../params/ParamStore';
 import { CUSTOM_PALETTE, findPalette, renderPalette } from '../params/palettes';
 import { createRng } from '../util/math';
@@ -40,6 +40,12 @@ export interface Transition {
   progress: number;
   /** Index into TRANSITION_STYLES. */
   style: number;
+}
+
+/** A picture of one image layer. Aspect 0 means the layer is empty. */
+interface Picture {
+  readonly texture: Texture;
+  aspect: number;
 }
 
 /** What a look carries from one frame to the next, apart from its parameters. */
@@ -108,10 +114,10 @@ export class Renderer {
   private readonly audioTextures: AudioTextures;
   private readonly globals: GlobalsBuffer;
   private readonly noise: Texture;
-  private readonly imageTexture: Texture;
+  /** One per image layer. */
+  private readonly pictures: Picture[];
   private readonly vao: WebGLVertexArrayObject;
 
-  private imageAspect = 0;
   private transitionId = 0;
   private outputWidth = 0;
   private outputHeight = 0;
@@ -137,7 +143,7 @@ export class Renderer {
     this.globals = new GlobalsBuffer(gl);
 
     // Compile everything up front so switching patterns during a set never hitches.
-    for (const def of [...GENERATORS, ...Object.values(STAGES)]) {
+    for (const def of [...GENERATORS, ...Object.values(STAGES), ...IMAGE_LAYERS.slice(1)]) {
       this.passes.set(def.id, new EffectPass(gl, def));
     }
     this.bloom = new BloomStage(gl);
@@ -167,16 +173,19 @@ export class Renderer {
     this.noise.allocate(NOISE_SIZE, NOISE_SIZE, noiseData);
 
     // Premultiplied and still sRGB encoded, so transparent edges filter and mip cleanly.
-    // Shaders read it through imageAt(), which undoes both.
-    this.imageTexture = new Texture(gl, {
-      internalFormat: gl.RGBA8,
-      format: gl.RGBA,
-      type: gl.UNSIGNED_BYTE,
-      wrapS: gl.MIRRORED_REPEAT,
-      wrapT: gl.MIRRORED_REPEAT,
-      mipmaps: true,
+    // Shaders read them through imageAt(), which undoes both.
+    this.pictures = IMAGE_LAYERS.map(() => {
+      const texture = new Texture(gl, {
+        internalFormat: gl.RGBA8,
+        format: gl.RGBA,
+        type: gl.UNSIGNED_BYTE,
+        wrapS: gl.MIRRORED_REPEAT,
+        wrapT: gl.MIRRORED_REPEAT,
+        mipmaps: true,
+      });
+      texture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
+      return { texture, aspect: 0 };
     });
-    this.imageTexture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
 
     this.subscriptions.push(
       params.subscribe((path) => {
@@ -196,9 +205,6 @@ export class Renderer {
     return this.outputHeight;
   }
 
-  get hasImage(): boolean {
-    return this.imageAspect > 0;
-  }
 
   /**
    * Sets the output resolution and the internal scene scale.
@@ -237,15 +243,21 @@ export class Renderer {
     this.bloom.resize(sw, sh);
   }
 
-  /** Installs the user image, or removes it when `image` is null. */
-  setImage(image: ImageSource | null): void {
+  /** Installs a picture in an image layer, or empties the layer when `image` is null. */
+  setImage(layer: number, image: ImageSource | null): void {
+    const picture = this.pictures[layer]!;
     if (!image) {
-      this.imageTexture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
-      this.imageAspect = 0;
+      picture.texture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
+      picture.aspect = 0;
       return;
     }
-    this.imageTexture.upload(image.source, image.width, image.height, image.flipY, true);
-    this.imageAspect = image.width / image.height;
+    picture.texture.upload(image.source, image.width, image.height, image.flipY, true);
+    picture.aspect = image.width / image.height;
+  }
+
+  /** The picture the tunnel's image walls show: the first one loaded. */
+  private get wall(): Picture {
+    return this.pictures.find((p) => p.aspect > 0) ?? this.pictures[0]!;
   }
 
   /** Clears all temporal state: feedback history and the spectrogram. */
@@ -268,7 +280,7 @@ export class Renderer {
     this.globals.update(frame, {
       historyRow: this.audioTextures.historyRow,
       historyFraction: this.audioTextures.historyFraction,
-      imageAspect: this.imageAspect,
+      imageAspect: this.wall.aspect,
       outputWidth: this.outputWidth,
       outputHeight: this.outputHeight,
     });
@@ -278,7 +290,6 @@ export class Renderer {
     this.audioTextures.waveform.bind(1);
     this.audioTextures.spectrogram.bind(2);
     this.noise.bind(3);
-    this.imageTexture.bind(5);
 
     if (!transition) {
       this.drawLook(this.params, this.current, null);
@@ -306,13 +317,24 @@ export class Renderer {
   private drawLook(p: ParamStore, look: LookState, target: RenderTarget | null): void {
     if (look.paletteDirty) this.updatePalette(look, p);
     look.palette.bind(4);
+    this.wall.texture.bind(5);
 
     const chain = this.chain;
     // Runs one stage of the chain and returns its result.
-    const stage = (id: string, inputs: Record<string, Texture>): Texture => {
-      this.pass(id).draw(chain.write, inputs, p);
+    const stage = (id: string, inputs: Record<string, Texture>, uniforms?: Record<string, number>): Texture => {
+      this.pass(id).draw(chain.write, inputs, p, 0, 0, uniforms);
       chain.swap();
       return chain.read.texture;
+    };
+    // Draws the image layers placed at one point of the chain, in layer order.
+    const images = (placement: string): void => {
+      IMAGE_LAYERS.forEach((layer, i) => {
+        const picture = this.pictures[i]!;
+        if (picture.aspect === 0 || p.num(`${layer.id}.opacity`) <= 0.001) return;
+        if (p.str(`${layer.id}.placement`) !== placement) return;
+        picture.texture.bind(5);
+        current = stage(layer.id, { u_input: current }, { u_layerAspect: picture.aspect });
+      });
     };
 
     // --- generators ----------------------------------------------------------------------------
@@ -324,10 +346,8 @@ export class Renderer {
       current = stage('layers', { u_input: current, u_inputB: this.genB.texture });
     }
 
-    // --- image, in the scene --------------------------------------------------------------------
-    const showImage = this.hasImage && p.num('image.opacity') > 0.001;
-    const imageOnTop = p.str('image.placement') === 'top';
-    if (showImage && !imageOnTop) current = stage('image', { u_input: current });
+    // --- images in the scene ---------------------------------------------------------------------
+    images('scene');
 
     // --- feedback ------------------------------------------------------------------------------
     const feedbackOn = p.num('feedback.amount') > 0.001;
@@ -355,10 +375,10 @@ export class Renderer {
     }
     if (feedbackOn && tap === 'final') this.copy(chain.read, look.history);
 
-    // --- image, on top ---------------------------------------------------------------------------
-    // After every effect that would smear or recolour it, and outside the feedback loop, but
-    // still on the screen it is shown on.
-    if (showImage && imageOnTop) current = stage('image', { u_input: current });
+    // --- images on top ----------------------------------------------------------------------------
+    // After every effect that would smear or recolour them, and outside the feedback loop, but
+    // still on the screen they are shown on.
+    images('top');
 
     // --- display -------------------------------------------------------------------------------
     if (p.num('crt.amount') > 0.001) {
@@ -437,7 +457,7 @@ export class Renderer {
     this.audioTextures.dispose();
     this.globals.dispose();
     this.noise.dispose();
-    this.imageTexture.dispose();
+    for (const picture of this.pictures) picture.texture.dispose();
     this.gl.deleteVertexArray(this.vao);
   }
 }

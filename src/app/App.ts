@@ -6,6 +6,7 @@ import { LiveRecorder } from '../export/LiveRecorder';
 import { exportVideo, sliceBuffer } from '../export/exportVideo';
 import type { ExportResult, FrameSink } from '../export/types';
 import { GENERATORS } from '../effects/generators';
+import { IMAGE_LAYERS } from '../effects/stages';
 import { MAX_IMAGE_SIZE, Renderer, type ImageSource } from '../gfx/Renderer';
 import { PresetManager, upgradePreset } from '../params/presets';
 import { createParamStore, outputSize, randomizeLook } from '../params/schema';
@@ -56,7 +57,8 @@ export class App {
   private readonly exportDialog: ExportDialog;
   private readonly rng = createRng((Date.now() ^ 0x9e3779b9) >>> 0);
 
-  private image: ImageSource | null = null;
+  /** The picture in each image layer, or null for an empty layer. */
+  private readonly images: Array<ImageSource | null> = IMAGE_LAYERS.map(() => null);
   private appliedResolution = '';
   private exporting = false;
   private contextLost = false;
@@ -118,10 +120,11 @@ export class App {
     });
     this.panel = new Panel(this.params, {
       tapTempo: () => this.tapTempo(),
-      loadImage: () => void this.pickImage(),
-      useTestCard: () => this.setImage({ source: createTestCard(), width: 1920, height: 1080, flipY: true }),
-      removeImage: () => this.setImage(null),
-      hasImage: () => this.image !== null,
+      loadImage: (layer) => void this.pickImage(layer),
+      useTestCard: (layer) =>
+        this.setImage(layer, { source: createTestCard(), width: 1920, height: 1080, flipY: true }),
+      removeImage: (layer) => this.setImage(layer, null),
+      hasImage: (layer) => this.images[layer] !== null,
       cycleStatus: () => this.cycler.describe(),
     });
     this.side = h('aside', { class: 'panel' }, [this.header.element, this.panel.element]);
@@ -240,18 +243,35 @@ export class App {
 
   // --- image -------------------------------------------------------------------------------------
 
-  private setImage(image: ImageSource | null): void {
-    this.image = image;
-    this.renderer.setImage(image);
+  private setImage(layer: number, image: ImageSource | null): void {
+    // The bitmap is kept to restore a lost graphics context. A replaced one can go.
+    const previous = this.images[layer];
+    if (previous?.source instanceof ImageBitmap) previous.source.close();
+    this.images[layer] = image;
+    this.renderer.setImage(layer, image);
     this.panel.rebuild();
   }
 
-  private async pickImage(): Promise<void> {
+  private async pickImage(layer: number): Promise<void> {
     const file = await pickFile(IMAGE_TYPES);
-    if (file) await this.loadImage(file);
+    if (file) await this.loadImage(file, layer);
   }
 
-  private async loadImage(file: File): Promise<void> {
+  /**
+   * Puts dropped pictures into the empty image layers in turn. With every layer taken, the
+   * first replaces the picture of the layer shown in the panel.
+   */
+  private async dropImages(files: File[]): Promise<void> {
+    const empty = this.images.flatMap((image, layer) => (image ? [] : [layer]));
+    const layers = empty.length > 0 ? empty : [this.panel.imageLayer];
+    const fitting = files.slice(0, layers.length);
+    for (const [i, file] of fitting.entries()) await this.loadImage(file, layers[i]!);
+    this.panel.showImageLayer(layers[fitting.length - 1]!);
+    const left = files.length - fitting.length;
+    if (left > 0) toast(`${left} more picture${left === 1 ? '' : 's'} did not fit. There are ${IMAGE_LAYERS.length} image layers.`);
+  }
+
+  private async loadImage(file: File, layer: number): Promise<void> {
     try {
       // Bitmaps ignore the GL flip and premultiply flags, so both are baked in while decoding.
       const decode: ImageBitmapOptions = { imageOrientation: 'flipY', premultiplyAlpha: 'premultiply' };
@@ -268,8 +288,8 @@ export class App {
           resizeQuality: 'high',
         });
       }
-      this.setImage({ source: bitmap, width: bitmap.width, height: bitmap.height, flipY: false });
-      toast(`Image loaded: ${file.name}`);
+      this.setImage(layer, { source: bitmap, width: bitmap.width, height: bitmap.height, flipY: false });
+      toast(`Image ${layer + 1}: ${file.name}`);
     } catch {
       toastError(new Error(`"${file.name}" could not be read as an image.`));
     }
@@ -469,13 +489,13 @@ export class App {
     stage.addEventListener('drop', (event) => {
       event.preventDefault();
       stage.classList.remove('dragging');
-      const file = event.dataTransfer?.files[0];
-      if (!file) return;
-      if (file.type.startsWith('image/')) {
-        void this.loadImage(file);
-      } else {
+      const files = [...(event.dataTransfer?.files ?? [])];
+      const pictures = files.filter((file) => file.type.startsWith('image/'));
+      if (pictures.length > 0) {
+        void this.dropImages(pictures);
+      } else if (files[0]) {
         this.audio
-          .useFile(file)
+          .useFile(files[0])
           .then(() => (this.startOverlay.hidden = true))
           .catch(toastError);
       }
@@ -489,7 +509,7 @@ export class App {
     });
     this.canvas.addEventListener('webglcontextrestored', () => {
       this.renderer = this.createRenderer();
-      this.renderer.setImage(this.image);
+      this.images.forEach((image, layer) => this.renderer.setImage(layer, image));
       this.applyResolution();
       this.contextLost = false;
       toast('Graphics context restored');

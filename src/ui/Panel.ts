@@ -1,3 +1,4 @@
+import { IMAGE_LAYERS } from '../effects/stages';
 import type { ParamStore } from '../params/ParamStore';
 import { CUSTOM_PALETTE, findPalette } from '../params/palettes';
 import { CUSTOM_RESOLUTION } from '../params/schema';
@@ -11,10 +12,10 @@ const DEFAULT_OPEN = ['tempo', 'layers', 'color', 'crt'];
 
 export interface PanelActions {
   tapTempo(): void;
-  loadImage(): void;
-  useTestCard(): void;
-  removeImage(): void;
-  hasImage(): boolean;
+  loadImage(layer: number): void;
+  useTestCard(layer: number): void;
+  removeImage(layer: number): void;
+  hasImage(layer: number): boolean;
   /** One line about the look cycle: what plays, what comes next and when. */
   cycleStatus(): string;
 }
@@ -57,6 +58,8 @@ export class Panel {
   /** Rows collected while a section builds. */
   private building: ParamRow[] = [];
   private cycleStatus: HTMLElement | null = null;
+  /** The image layer whose settings the Image section shows. */
+  private selectedLayer = 0;
   private readonly unsubscribe: () => void;
   private frame = 0;
 
@@ -102,6 +105,24 @@ export class Panel {
   /** Brings every section up to date, for changes the parameters do not show, such as a new image. */
   rebuild(): void {
     this.update('*');
+  }
+
+  /** The image layer selected in the Image section. */
+  get imageLayer(): number {
+    return this.selectedLayer;
+  }
+
+  /** Opens the Image section on an image layer. */
+  showImageLayer(layer: number): void {
+    this.selectedLayer = layer;
+    const details = this.details.get('image')!;
+    if (details.open) {
+      this.build(this.sections.find((s) => s.id === 'image')!);
+    } else {
+      // Built by the toggle handler, once the section has opened.
+      this.built.delete('image');
+      details.open = true;
+    }
   }
 
   /**
@@ -280,31 +301,47 @@ export class Panel {
       {
         id: 'image',
         title: 'Image',
-        groups: () => ['image'],
-        layout: () => String(this.actions.hasImage()),
+        // The reset button resets the layer on show.
+        groups: () => [IMAGE_LAYERS[this.selectedLayer]!.id],
+        layout: () =>
+          `${this.selectedLayer}:${IMAGE_LAYERS.map((_, i) => (this.actions.hasImage(i) ? 1 : 0)).join('')}`,
         build: (body) => {
+          const layer = this.selectedLayer;
+          const group = IMAGE_LAYERS[layer]!.id;
+          const tabs = IMAGE_LAYERS.map((_, i) => {
+            const loaded = this.actions.hasImage(i);
+            const tab = button(
+              String(i + 1),
+              () => this.showImageLayer(i),
+              `${i === layer ? 'active' : ''} ${loaded ? 'loaded' : ''}`,
+              `Image layer ${i + 1}${loaded ? '' : ', empty'}`,
+            );
+            tab.setAttribute('aria-pressed', String(i === layer));
+            return tab;
+          });
           body.append(
+            h('div', { class: 'layer-tabs', attrs: { role: 'group', 'aria-label': 'Image layers' } }, tabs),
             h('div', { class: 'button-row' }, [
-              button('Load image', () => this.actions.loadImage()),
-              button('Test card', () => this.actions.useTestCard(), '', 'A generated TV test card'),
-              button('Remove', () => this.actions.removeImage()),
+              button('Load image', () => this.actions.loadImage(layer)),
+              button('Test card', () => this.actions.useTestCard(layer), '', 'A generated TV test card'),
+              button('Remove', () => this.actions.removeImage(layer)),
             ]),
           );
-          if (!this.actions.hasImage()) {
+          if (!this.actions.hasImage(layer)) {
             body.append(
               h('div', {
                 class: 'note',
-                text: 'No image loaded. Load one here or drop a file onto the picture. Transparent PNGs keep their transparency, which suits logos.',
+                text: `Layer ${layer + 1} is empty. Load a picture here, or drop pictures onto the screen: several at once fill the empty layers. Transparent PNGs keep their transparency, which suits logos.`,
               }),
             );
           }
-          this.addRows(body, 'image', ['placement', 'blend', 'opacity']);
+          this.addRows(body, group, ['placement', 'blend', 'opacity']);
           body.append(h('div', { class: 'subhead', text: 'Size and position' }));
-          this.addRows(body, 'image', ['fit', 'scale', 'x', 'y', 'rotate', 'kaleido']);
+          this.addRows(body, group, ['fit', 'scale', 'x', 'y', 'rotate', 'kaleido']);
           body.append(h('div', { class: 'subhead', text: 'Light' }));
-          this.addRows(body, 'image', ['brightness', 'glow', 'shadow']);
+          this.addRows(body, group, ['brightness', 'glow', 'shadow']);
           body.append(h('div', { class: 'subhead', text: 'Movement' }));
-          this.addRows(body, 'image', ['glitch', 'split', 'warp', 'ripple', 'displace']);
+          this.addRows(body, group, ['glitch', 'split', 'warp', 'ripple', 'displace']);
         },
       },
       simple('feedback', 'Feedback'),

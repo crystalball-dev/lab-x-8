@@ -264,16 +264,45 @@ export const STAGES = {
 /** Extra shader sources used by the bloom stage. */
 export const BLOOM_SHADERS = { down: bloomDown, up: bloomUp };
 
+/**
+ * Where each image layer starts, so a second picture does not land on the first: the first in
+ * the middle, the others small in the corners.
+ */
+const LAYER_PLACES: Array<Record<string, number>> = [
+  {},
+  { x: 0.62, y: -0.68, scale: 0.3 },
+  { x: -0.62, y: -0.68, scale: 0.3 },
+  { x: 0.62, y: 0.68, scale: 0.3 },
+];
+
+/**
+ * The image layers: the image stage once per picture, each with its own settings at
+ * `image.*`, `image2.*` and so on. The first is `STAGES.image` itself.
+ */
+export const IMAGE_LAYERS: EffectDef[] = LAYER_PLACES.map((place, i) =>
+  i === 0
+    ? STAGES.image
+    : {
+        ...STAGES.image,
+        id: `image${i + 1}`,
+        label: `Image ${i + 1}`,
+        params: STAGES.image.params.map((def) =>
+          def.type === 'float' && def.key in place ? { ...def, default: place[def.key]! } : def,
+        ),
+      },
+);
+
 if (import.meta.hot) {
   import.meta.hot.accept((next) => {
     const stages = next?.STAGES as Record<string, EffectDef> | undefined;
+    const layers = next?.IMAGE_LAYERS as EffectDef[] | undefined;
     const bloom = next?.BLOOM_SHADERS as typeof BLOOM_SHADERS | undefined;
-    if (!stages || !bloom || !sameParams(Object.values(stages), Object.values(STAGES))) {
+    if (!stages || !layers || !bloom || !sameParams(Object.values(stages), Object.values(STAGES))) {
       import.meta.hot!.invalidate();
       return;
     }
     publishShaders([
-      ...toHotShaders(Object.values(stages)),
+      ...toHotShaders([...Object.values(stages), ...layers.slice(1)]),
       { id: 'bloom.down', fragment: bloom.down },
       { id: 'bloom.up', fragment: bloom.up },
     ]);

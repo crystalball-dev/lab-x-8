@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { ParamStore, hexToLinear } from '../src/params/ParamStore';
 import { PALETTES, renderPalette } from '../src/params/palettes';
 import { upgradePreset } from '../src/params/presets';
-import { RESOLUTIONS, createParamStore, outputSize, parseResolution } from '../src/params/schema';
+import { RESOLUTIONS, createParamStore, outputSize, parseResolution, randomizeLook } from '../src/params/schema';
+import { createRng } from '../src/util/math';
 import { MOD_SOURCES, MOD_SOURCE_INDEX, type ParamGroup, type PresetData } from '../src/params/types';
 
 const LOOK: ParamGroup = {
@@ -277,6 +278,26 @@ describe('Preset upgrade', () => {
     expect(upgradePreset(current)).toBe(current);
     const noImage: PresetData = { version: 1, values: { 'layers.a': 'tunnel' } };
     expect(upgradePreset(noImage)).toBe(noImage);
+  });
+});
+
+describe('Image layers', () => {
+  it('start in different places, so a second picture does not cover the first', () => {
+    const store = createParamStore();
+    expect([store.get('image.x'), store.get('image.y'), store.get('image.scale')]).toEqual([0, 0, 0.8]);
+    expect([store.get('image2.x'), store.get('image2.y'), store.get('image2.scale')]).toEqual([0.62, -0.68, 0.3]);
+    expect([store.get('image3.x'), store.get('image4.y')]).toEqual([-0.62, 0.68]);
+  });
+
+  it('keep their settings through presets that do not store them, and through Random', () => {
+    const store = createParamStore();
+    store.set('image2.x', -0.5);
+    store.load({ version: 1, values: { 'image.scale': 0.4 } });
+    expect(store.get('image.scale')).toBe(0.4);
+    expect(store.get('image2.x')).toBe(-0.5);
+    randomizeLook(store, createRng(3));
+    expect(store.get('image.scale')).toBe(0.4);
+    expect(store.get('image2.x')).toBe(-0.5);
   });
 });
 

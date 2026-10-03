@@ -4,6 +4,8 @@
 #include <color>
 
 uniform sampler2D u_input;
+/** Width over height of this layer's picture, which the renderer binds as u_image. */
+uniform float u_layerAspect;
 uniform int p_blend;
 uniform float p_opacity;
 uniform int p_fit;
@@ -23,7 +25,7 @@ uniform float p_displace;
 
 /** Size of the picture on screen at scale 1, in centred units: the screen is 1 high. */
 vec2 fittedSize() {
-  float ia = u_imageAspect;
+  float ia = u_layerAspect;
   float sa = u_aspect;
   if (p_fit == 0) return vec2(ia, 1.0) * (ia > sa ? 1.0 : sa / ia);   // cover
   if (p_fit == 1) return vec2(ia, 1.0) * (ia > sa ? sa / ia : 1.0);   // contain

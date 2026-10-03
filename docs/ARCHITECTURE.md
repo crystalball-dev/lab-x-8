@@ -194,9 +194,11 @@ time, and tap tempo sets the offset.
                                       └──────┴────────┴── history ◄────┘
 ```
 
-\* The image stage runs at one of the two points, chosen by `image.placement`. In the scene,
-every effect acts on the picture. On top, it is composited after bloom and outside the feedback
-loop, so it keeps its own colours and only the CRT acts on it.
+\* Each of the four image layers runs at one of the two points, chosen by its `placement`. In
+the scene, every effect acts on the picture. On top, it is composited after bloom and outside
+the feedback loop, so it keeps its own colours and only the CRT acts on it. The layers are the
+image stage compiled once per layer (`IMAGE_LAYERS`), with settings at `image.*`, `image2.*`
+and so on, a texture each, and the picture's aspect passed as `u_layerAspect`.
 
 - Everything up to the image on top runs at scene resolution in linear HDR.
 - CRT and output run at output resolution, so scanlines and the phosphor mask are pixel exact

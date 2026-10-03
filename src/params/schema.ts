@@ -1,6 +1,6 @@
 import { BANDS, DEFAULT_BPM, TEMPO_MAX_BPM, TEMPO_MIN_BPM } from '../audio/analysis/features';
 import { GENERATORS } from '../effects/generators';
-import { STAGES } from '../effects/stages';
+import { IMAGE_LAYERS, STAGES } from '../effects/stages';
 import type { EffectDef } from '../effects/types';
 import { ParamStore } from './ParamStore';
 import type { ParamDef, ParamGroup } from './types';
@@ -101,8 +101,8 @@ export const CYCLE_GROUP: ParamGroup = {
   ],
 };
 
-/** Groups of the look that Random leaves alone: the picture and the output settings. */
-const RANDOMIZE_SKIP = new Set(['image', 'output']);
+/** Groups of the look that Random leaves alone: the pictures and the output settings. */
+const RANDOMIZE_SKIP = new Set(['output', ...IMAGE_LAYERS.map((layer) => layer.id)]);
 
 /**
  * Rolls a new look, as the Random button does. Settings without a random range, such as the
@@ -186,8 +186,8 @@ export function createParamStore(): ParamStore {
   store.register(effectGroup(STAGES.layers));
   for (const generator of GENERATORS) store.register(effectGroup(generator));
   store.register(MOTION_GROUP);
-  // Presets without image settings, such as the built-in looks, leave the picture where it was put.
-  store.register({ ...effectGroup(STAGES.image), optional: true });
+  // Presets without settings for an image layer, such as the built-in looks, leave it as it is.
+  for (const layer of IMAGE_LAYERS) store.register({ ...effectGroup(layer), optional: true });
   store.register(effectGroup(STAGES.feedback));
   store.register(effectGroup(STAGES.color));
   store.register(effectGroup(STAGES.glitch));

@@ -102,8 +102,9 @@ export class EffectPass {
 
   /**
    * Draws the effect.
-   * @param target  render target, or null for the canvas
-   * @param inputs  textures by sampler uniform name
+   * @param target    render target, or null for the canvas
+   * @param inputs    textures by sampler uniform name
+   * @param uniforms  values the engine supplies, such as the aspect of an image layer
    */
   draw(
     target: RenderTarget | null,
@@ -111,10 +112,12 @@ export class EffectPass {
     params: ParamStore,
     canvasWidth = 0,
     canvasHeight = 0,
+    uniforms: Record<string, number> = {},
   ): void {
     const gl = this.gl;
     this.program.use();
     for (const bind of this.binders) bind(gl, params);
+    for (const name in uniforms) this.program.set1f(name, uniforms[name]!);
     drawFullscreen(gl, this.program, target, inputs, canvasWidth, canvasHeight);
   }
 

@@ -166,9 +166,15 @@ fit, as it does for 1080 x 1350.
 
 ### Image
 
-**Load image** in the Image section, or drop a file onto the picture. **Test card** generates
-a broadcast test pattern to try things with. PNG transparency is kept, so a logo sits cleanly
-on the visuals.
+Up to four pictures can be on screen at once, on image layers 1 to 4, each with its own
+settings. The tabs at the top of the Image section choose the layer the controls below act on,
+and a dot marks a layer that holds a picture. **Load image**, **Test card** and **Remove** act
+on the chosen layer. Pictures dropped onto the screen fill the empty layers in turn, several at
+once if you like. Layer 1 starts in the middle and layers 2 to 4 small in the corners, so a logo
+does not cover the artwork. Higher layers are drawn over lower ones.
+
+**Test card** generates a broadcast test pattern to try things with. PNG transparency is kept,
+so a logo sits cleanly on the visuals.
 
 **Placement** decides where the picture enters the chain:
 
@@ -188,11 +194,12 @@ What makes the picture part of the show rather than a sticker on it:
 **Position X** and **Position Y** move it, for example into a corner as a watermark. For a logo
 on a black background choose the blend **Screen**, for one on white **Multiply**.
 
-A preset you save stores the image settings with the look. The built-in looks store none, so
-switching between them leaves the picture where you put it.
+A preset you save stores the settings of every image layer with the look. The built-in looks
+store none, so switching between them leaves the pictures where you put them. The pictures
+themselves are not stored, only their settings.
 
-The image can also be mapped onto the tunnel walls: choose the pattern "Image walls" in the
-Tunnel generator.
+A picture can also be mapped onto the tunnel walls: choose the pattern "Image walls" in the
+Tunnel generator. The walls show the lowest layer that holds a picture.
 
 ### Letting the audio drive a parameter
 

@@ -701,6 +701,36 @@ details.section > summary .reset:hover {
   line-height: 1.4;
 }
 
+/* Tabs for the image layers. A dot marks a layer that holds a picture. */
+.layer-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.layer-tabs .btn {
+  flex: 1;
+  position: relative;
+}
+
+.layer-tabs .btn.active {
+  border-color: var(--sec);
+  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 14%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--sec) 35%, transparent);
+}
+
+.layer-tabs .btn.loaded::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--sec);
+  box-shadow: 0 0 6px var(--sec);
+}
+
 /* What the look cycle is playing and what comes next. */
 .cycle-status {
   padding: 7px 9px;
