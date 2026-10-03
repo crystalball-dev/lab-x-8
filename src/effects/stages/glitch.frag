@@ -30,9 +30,10 @@ void main() {
              (hash12(vec2(y2, tq + 9.3)) - 0.5) * on2 * 0.4;
   uv.x += dx * p_shift * p_slices;
 
-  // Macroblocks jump to the wrong place, like a damaged video stream.
+  // Macroblocks jump to the wrong place, like a damaged video stream. Nine rows of square
+  // blocks, so 16 by 9 on a wide picture, at any shape.
   float grid = 1.0 + floor(hash11(tq + 2.0) * 3.0);
-  vec2 g = floor(uv * vec2(16.0, 9.0) * grid);
+  vec2 g = floor(uv * vec2(9.0 * u_aspect, 9.0) * grid);
   float onB = step(1.0 - a * 0.3 * p_blocks, hash12(g + tq * 0.31));
   uv += (hash22(g + tq) - 0.5) * 0.18 * onB * p_blocks;
 
@@ -42,7 +43,7 @@ void main() {
   uv.x += below * p_tear * a * 0.12 * (hash11(tq + 13.0) - 0.5) * 2.0;
 
   // Mosaic: random blocks lose resolution.
-  float cell = hash12(floor(v_uv * vec2(8.0, 4.5)) + tq * 0.13);
+  float cell = hash12(floor(v_uv * vec2(4.5 * u_aspect, 4.5)) + tq * 0.13);
   float onM = step(1.0 - a * p_mosaic, cell);
   float size = mix(1.0, 48.0, onM * p_mosaic) * u_resolution.y / 1080.0;
   if (size > 1.5) uv = (floor(uv * u_resolution / size) + 0.5) * size / u_resolution;

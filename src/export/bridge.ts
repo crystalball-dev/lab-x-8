@@ -18,6 +18,8 @@ export interface BridgeCodec {
   label: string;
   extension: string;
   usesBitrate: boolean;
+  /** Width and height must divide by this. */
+  multipleOf: number;
 }
 
 export interface BridgeInfo {

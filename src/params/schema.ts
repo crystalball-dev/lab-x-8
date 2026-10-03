@@ -122,12 +122,24 @@ export const MOTION_GROUP: ParamGroup = {
   ],
 };
 
+/** Listed output sizes: wide 16:9 first, then square, upright and other shapes. */
 export const RESOLUTIONS = [
   { value: '1280x720', label: '720p  (1280 x 720)' },
   { value: '1920x1080', label: '1080p (1920 x 1080)' },
   { value: '2560x1440', label: '1440p (2560 x 1440)' },
   { value: '3840x2160', label: '2160p (3840 x 2160)' },
+  { value: '1080x1080', label: 'Square 1:1 (1080 x 1080)' },
+  { value: '1440x1440', label: 'Square 1:1 (1440 x 1440)' },
+  { value: '2160x2160', label: 'Square 1:1 (2160 x 2160)' },
+  { value: '1080x1350', label: 'Portrait 4:5 (1080 x 1350)' },
+  { value: '1080x1920', label: 'Vertical 9:16 (1080 x 1920)' },
+  { value: '1440x2560', label: 'Vertical 9:16 (1440 x 2560)' },
+  { value: '1440x1080', label: 'Classic 4:3 (1440 x 1080)' },
+  { value: '2560x1080', label: 'Ultrawide 21:9 (2560 x 1080)' },
 ];
+
+/** The resolution setting that uses the custom width and height. */
+export const CUSTOM_RESOLUTION = 'custom';
 
 /** Machine settings. Never part of a preset. */
 export const SYSTEM_GROUP: ParamGroup = {
@@ -135,7 +147,15 @@ export const SYSTEM_GROUP: ParamGroup = {
   label: 'Display',
   preset: false,
   params: [
-    { key: 'resolution', label: 'Resolution', type: 'select', default: '1920x1080', options: RESOLUTIONS },
+    {
+      key: 'resolution',
+      label: 'Resolution',
+      type: 'select',
+      default: '1920x1080',
+      options: [...RESOLUTIONS, { value: CUSTOM_RESOLUTION, label: 'Custom size' }],
+    },
+    { key: 'width', label: 'Width', type: 'int', min: 16, max: 7680, default: 1920, rand: false, hint: 'Custom width in pixels. An odd number is rounded up, because video encoders need even sizes.' },
+    { key: 'height', label: 'Height', type: 'int', min: 16, max: 7680, default: 1080, rand: false, hint: 'Custom height in pixels. An odd number is rounded up, because video encoders need even sizes.' },
     { key: 'renderScale', label: 'Render scale', type: 'float', min: 0.5, max: 1, step: 0.05, default: 1, rand: false, hint: 'Lower values render the scene smaller and upscale it. CRT detail stays sharp.' },
     {
       key: 'fpsLimit',
@@ -181,4 +201,12 @@ export function createParamStore(): ParamStore {
 export function parseResolution(value: string): { width: number; height: number } {
   const [w, h] = value.split('x').map(Number);
   return { width: w || 1920, height: h || 1080 };
+}
+
+/** The output size in pixels: a listed resolution, or the custom width and height made even. */
+export function outputSize(params: ParamStore): { width: number; height: number } {
+  const value = params.str('system.resolution');
+  if (value !== CUSTOM_RESOLUTION) return parseResolution(value);
+  const even = (n: number): number => Math.ceil(n / 2) * 2;
+  return { width: even(params.num('system.width')), height: even(params.num('system.height')) };
 }

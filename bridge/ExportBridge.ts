@@ -440,6 +440,7 @@ export class ExportBridge {
             label: spec.label,
             extension: spec.extension,
             usesBitrate: spec.usesBitrate,
+            multipleOf: spec.multipleOf ?? 1,
           })),
       });
       return;
@@ -486,6 +487,11 @@ export class ExportBridge {
       const sizeOk = width >= 16 && width <= 8192 && height >= 16 && height <= 8192;
       if (!sizeOk || !(fps >= 1 && fps <= 240)) {
         sendJson(res, 400, { error: 'Invalid frame size or frame rate.' });
+        return;
+      }
+      const block = spec.multipleOf ?? 1;
+      if (width % block !== 0 || height % block !== 0) {
+        sendJson(res, 400, { error: `${spec.label} needs a width and height divisible by ${block}.` });
         return;
       }
       const target = this.resolveTarget(

@@ -1,5 +1,6 @@
 import type { ParamStore } from '../params/ParamStore';
 import { CUSTOM_PALETTE, findPalette } from '../params/palettes';
+import { CUSTOM_RESOLUTION } from '../params/schema';
 import { button, h } from '../util/dom';
 import { storage } from '../util/storage';
 import { createParamRow, type ParamRow } from './ParamRow';
@@ -350,8 +351,11 @@ export class Panel {
         id: 'output',
         title: 'Output',
         groups: () => ['output', 'system'],
+        // Width and height only show for a custom size.
+        layout: () => String(p.str('system.resolution') === CUSTOM_RESOLUTION),
         build: (body) => {
-          this.addRows(body, 'system');
+          const custom = p.str('system.resolution') === CUSTOM_RESOLUTION;
+          this.addRows(body, 'system', ['resolution', ...(custom ? ['width', 'height'] : []), 'renderScale', 'fpsLimit', 'hud']);
           this.addRows(body, 'output');
         },
       },

@@ -26,7 +26,8 @@ export interface ExportRequest {
 export interface ExportHost {
   /** The track that would be rendered, or null when the source is a live input. */
   track(): { duration: number; label: string } | null;
-  defaultResolution(): string;
+  /** Size of the live output, which the export starts from. */
+  outputSize(): { width: number; height: number };
   run(
     request: ExportRequest,
     onProgress: (progress: ExportProgress) => void,
@@ -86,6 +87,8 @@ export class ExportDialog {
   private readonly form: HTMLElement;
 
   private bridge: BridgeInfo | null = null;
+  /** The status line while nothing is wrong: the track and its length. */
+  private trackText = '';
   private abort: AbortController | null = null;
   private result: ExportResult | null = null;
   private duration = 0;
@@ -177,7 +180,13 @@ export class ExportDialog {
     this.form.hidden = false;
     this.renderButton.disabled = false;
     this.duration = track.duration;
-    this.resolution.value = this.host.defaultResolution();
+    this.trackText = `${track.label}  ${formatTime(track.duration)}`;
+    // The listed sizes, plus the custom output size when one is in use.
+    const { width, height } = this.host.outputSize();
+    const current = `${width}x${height}`;
+    const listed = RESOLUTIONS.some((r) => r.value === current);
+    options(this.resolution, listed ? RESOLUTIONS : [...RESOLUTIONS, { value: current, label: `Custom (${width} x ${height})` }]);
+    this.resolution.value = current;
     this.start.value = '0';
     this.start.max = String(track.duration);
     this.length.value = track.duration.toFixed(2);
@@ -191,7 +200,6 @@ export class ExportDialog {
     options(this.encoder, encoders);
     this.suggestBitrate();
     await this.refreshCodecs();
-    this.setStatus(`${track.label}  ${formatTime(track.duration)}`);
     this.dialog.showModal();
   }
 
@@ -222,16 +230,7 @@ export class ExportDialog {
         label: c.label,
       }));
       options(this.codec, items);
-      if (items.length === 0) {
-        this.setStatus(
-          desktop
-            ? 'No built-in encoder can handle this size. Use the FFmpeg encoder.'
-            : 'This browser cannot encode video at this size. Use Chrome or Edge, or the FFmpeg encoder.',
-          'error',
-        );
-      }
     }
-    this.renderButton.disabled = this.codec.options.length === 0;
     this.refreshDestinations();
   }
 
@@ -259,6 +258,31 @@ export class ExportDialog {
         ? (this.bridge?.codecs.find((c) => c.id === this.codec.value)?.usesBitrate ?? true)
         : true;
     this.bitrate.disabled = !usesBitrate;
+    this.refreshReadiness();
+  }
+
+  /** Enables Render when the settings can be encoded, and says why when they cannot. */
+  private refreshReadiness(): void {
+    const problem = this.problem();
+    this.renderButton.disabled = problem !== null;
+    this.setStatus(problem ?? this.trackText, problem ? 'error' : '');
+  }
+
+  private problem(): string | null {
+    if (this.codec.options.length === 0) {
+      return desktop
+        ? 'No built-in encoder can handle this size. Use the FFmpeg encoder.'
+        : 'This browser cannot encode video at this size. Use Chrome or Edge, or the FFmpeg encoder.';
+    }
+    if (this.encoder.value === 'ffmpeg') {
+      const codec = this.bridge?.codecs.find((c) => c.id === this.codec.value);
+      const block = codec?.multipleOf ?? 1;
+      const { width, height } = parseResolution(this.resolution.value);
+      if (codec && (width % block !== 0 || height % block !== 0)) {
+        return `${codec.label} needs a width and height divisible by ${block}, and ${width} x ${height} is not. Choose another size or codec.`;
+      }
+    }
+    return null;
   }
 
   /** File extension the chosen encoder and codec will produce. */

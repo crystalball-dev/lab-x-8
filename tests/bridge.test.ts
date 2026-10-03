@@ -348,6 +348,20 @@ describe.skipIf(!hasFfmpeg)('ExportBridge encoding', () => {
       await host.close();
     }
   });
+
+  it.skipIf(!hasFfmpeg)('refuses sizes the codec cannot divide into its blocks', async () => {
+    const host = await startHost();
+    try {
+      const info = await call(host, '/info');
+      const codecs = info.body.codecs as Array<{ id: string; multipleOf: number }>;
+      expect(codecs.find((c) => c.id === 'libx264')?.multipleOf).toBe(2);
+      const odd = await postJson(host, '/sessions', { width: 65, height: 36, fps: 30, name: 'x', codec: 'libx264' });
+      expect(odd.status).toBe(400);
+      expect(String(odd.body.error)).toContain('divisible by 2');
+    } finally {
+      await host.close();
+    }
+  });
 });
 
 describe('ExportBridge without FFmpeg', () => {

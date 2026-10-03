@@ -30,7 +30,7 @@ void main() {
     col = mix(a, b, smoothstep(threshold, threshold + 0.3, luma(b)));
   } else {
     // Glitch blocks: the picture flips block by block in random order, tearing as each flips.
-    vec2 cell = floor(v_uv * vec2(16.0, 9.0));
+    vec2 cell = floor(v_uv * vec2(9.0 * u_aspect, 9.0));
     float flip = hash12(cell) * 0.9 + 0.05;
     float near = smoothstep(0.08, 0.0, abs(t - flip));
     vec2 uv = v_uv + vec2((hash12(cell + 7.3) - 0.5) * 0.08 * near, 0.0);

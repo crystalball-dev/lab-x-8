@@ -8,7 +8,7 @@ import type { ExportResult, FrameSink } from '../export/types';
 import { GENERATORS } from '../effects/generators';
 import { MAX_IMAGE_SIZE, Renderer, type ImageSource } from '../gfx/Renderer';
 import { PresetManager, upgradePreset } from '../params/presets';
-import { createParamStore, parseResolution, randomizeLook } from '../params/schema';
+import { createParamStore, outputSize, randomizeLook } from '../params/schema';
 import type { PresetData } from '../params/types';
 import { publisherLink, wordmark } from '../ui/brand';
 import { ExportDialog, type ExportRequest } from '../ui/ExportDialog';
@@ -27,6 +27,8 @@ import { createTestCard } from './testCard';
 
 const STATE_KEY = 'lab-x-8.state.v1';
 const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
+/** Settings that change the size of the picture. */
+const SIZE_SETTINGS = new Set(['system.resolution', 'system.width', 'system.height', 'system.renderScale']);
 const IMAGE_TYPES = 'image/*';
 
 /**
@@ -130,7 +132,7 @@ export class App {
         const track = this.audio.track;
         return track ? { duration: track.duration, label: this.audio.state.label } : null;
       },
-      defaultResolution: () => this.params.str('system.resolution'),
+      outputSize: () => outputSize(this.params),
       run: (request, onProgress, signal) => this.runExport(request, onProgress, signal),
     });
 
@@ -138,7 +140,7 @@ export class App {
     this.hud.visible = this.params.bool('system.hud');
     const saveState = debounce(() => this.saveState(), 400);
     this.params.subscribe((path) => {
-      if (path === '*' || path === 'system.resolution' || path === 'system.renderScale') {
+      if (path === '*' || SIZE_SETTINGS.has(path)) {
         if (!this.exporting) this.applyResolution(false);
       }
       if (path === '*' || path === 'system.hud') this.hud.visible = this.params.bool('system.hud');
@@ -192,12 +194,11 @@ export class App {
 
   /** Sizes the renderer for the chosen resolution. Unless forced, only when that changed. */
   private applyResolution(force = true): void {
-    const resolution = this.params.str('system.resolution');
+    const { width, height } = outputSize(this.params);
     const scale = this.params.num('system.renderScale');
     // Every preset load reports a change. Skipping those keeps the frame statistics running.
-    if (!force && `${resolution}@${scale}` === this.appliedResolution) return;
-    this.appliedResolution = `${resolution}@${scale}`;
-    const { width, height } = parseResolution(resolution);
+    if (!force && `${width}x${height}@${scale}` === this.appliedResolution) return;
+    this.appliedResolution = `${width}x${height}@${scale}`;
     this.renderer.resize(width, height, scale);
     this.stats.width = width;
     this.stats.height = height;

@@ -151,6 +151,19 @@ After the patterns, the picture passes through these stages, in this order:
 Setting a stage's main amount to zero bypasses it completely. Each section of the control
 panel has its own colour, so you can tell at a glance which stage a slider belongs to.
 
+### Picture size
+
+**Resolution** in the Output section sets the size of the picture, for the live output and as
+the starting point of an export. Besides 16:9 from 720p to 2160p there are square 1:1,
+portrait 4:5, vertical 9:16, classic 4:3 and ultrawide 21:9 sizes. **Custom size** takes any
+width and height from 16 to 7680 pixels, for LED walls, projection or a social media format.
+Odd numbers are rounded up to even, which video encoders need. Patterns and effects follow the
+shape of the picture, and the cost follows its pixel count: 1080 x 1080 costs about half as
+much as 1080p.
+
+HAP needs a width and height divisible by 4. The export dialog says so when a size does not
+fit, as it does for 1080 x 1350.
+
 ### Image
 
 **Load image** in the Image section, or drop a file onto the picture. **Test card** generates

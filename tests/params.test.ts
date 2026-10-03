@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ParamStore, hexToLinear } from '../src/params/ParamStore';
 import { PALETTES, renderPalette } from '../src/params/palettes';
 import { upgradePreset } from '../src/params/presets';
+import { RESOLUTIONS, createParamStore, outputSize, parseResolution } from '../src/params/schema';
 import { MOD_SOURCES, MOD_SOURCE_INDEX, type ParamGroup, type PresetData } from '../src/params/types';
 
 const LOOK: ParamGroup = {
@@ -276,6 +277,27 @@ describe('Preset upgrade', () => {
     expect(upgradePreset(current)).toBe(current);
     const noImage: PresetData = { version: 1, values: { 'layers.a': 'tunnel' } };
     expect(upgradePreset(noImage)).toBe(noImage);
+  });
+});
+
+describe('Output size', () => {
+  it('reads a listed resolution, or the custom size made even', () => {
+    const store = createParamStore();
+    expect(outputSize(store)).toEqual({ width: 1920, height: 1080 });
+    store.set('system.resolution', '1080x1080');
+    expect(outputSize(store)).toEqual({ width: 1080, height: 1080 });
+    store.set('system.resolution', 'custom');
+    store.set('system.width', 1081);
+    store.set('system.height', 607);
+    expect(outputSize(store)).toEqual({ width: 1082, height: 608 });
+  });
+
+  it('lists only sizes that parse back to themselves and suit video encoders', () => {
+    for (const { value } of RESOLUTIONS) {
+      const { width, height } = parseResolution(value);
+      expect(`${width}x${height}`).toBe(value);
+      expect(width % 2 + height % 2).toBe(0);
+    }
   });
 });
 

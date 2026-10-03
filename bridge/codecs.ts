@@ -11,6 +11,11 @@ export interface CodecSpec {
   audio: string[];
   /** Converts full-range RGB to tagged BT.709 video. False for codecs that store RGB. */
   yuv: boolean;
+  /**
+   * Width and height must divide by this: 2 for subsampled colour, 4 for the texture blocks of
+   * HAP. Absent when any size works.
+   */
+  multipleOf?: number;
 }
 
 const AAC = ['-c:a', 'aac', '-b:a', '320k'];
@@ -29,6 +34,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     ],
     audio: AAC,
     yuv: true,
+    multipleOf: 2,
   },
   libx264: {
     label: 'H.264 (x264, highest quality)',
@@ -41,6 +47,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     ],
     audio: AAC,
     yuv: true,
+    multipleOf: 2,
   },
   hevc_nvenc: {
     label: 'H.265 / HEVC (NVIDIA NVENC)',
@@ -54,6 +61,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     ],
     audio: AAC,
     yuv: true,
+    multipleOf: 2,
   },
   prores_hq: {
     label: 'ProRes 422 HQ (MOV)',
@@ -63,6 +71,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     video: () => ['-c:v', 'prores_ks', '-profile:v', '3', '-vendor', 'apl0', '-pix_fmt', 'yuv422p10le'],
     audio: PCM,
     yuv: true,
+    multipleOf: 2,
   },
   prores_4444: {
     label: 'ProRes 4444 (MOV)',
@@ -81,6 +90,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     video: () => ['-c:v', 'hap', '-format', 'hap', '-chunks', '4'],
     audio: PCM,
     yuv: false,
+    multipleOf: 4,
   },
   hap_q: {
     label: 'HAP Q (MOV, for VJ software)',
@@ -90,6 +100,7 @@ export const FFMPEG_CODECS: Record<string, CodecSpec> = {
     video: () => ['-c:v', 'hap', '-format', 'hap_q', '-chunks', '4'],
     audio: PCM,
     yuv: false,
+    multipleOf: 4,
   },
 };
 
