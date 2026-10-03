@@ -1,5 +1,9 @@
 // Image: the user's picture. On top of the visuals it keeps its own colours and stays sharp; in
 // the scene it is mixed in before the effects. Either way the audio pulses, lights and bends it.
+//
+// Every image layer draws with this shader, only inside the part of the screen it can reach.
+// imageReach() in src/gfx/imageReach.ts works that out from the same numbers as below: how far
+// each effect can move the picture, and how far the glow and shadow spread. Change them together.
 #include <math>
 #include <color>
 
@@ -77,8 +81,8 @@ void main() {
   float wave = historyAt(0.08, length(p) * 1.1) - 0.35;
   p += normalize(p + 1e-5) * wave * p_ripple * 0.12;
 
-  // The visuals behind push the picture around.
-  p += (scene.rg - scene.gb) * p_displace * 0.08;
+  // The visuals behind push the picture around, at most as far as very bright light would.
+  p += clamp(scene.rg - scene.gb, -4.0, 4.0) * p_displace * 0.08;
 
   // Drum hits tear bands of the picture sideways. The bands re-roll 15 times a second.
   float tq = floor(u_time * 15.0);
@@ -100,10 +104,19 @@ void main() {
   vec3 img = vec3(r.r, g.g, b.b) * p_brightness;
   vec3 a = vec3(r.a, g.a, b.a) * (p_opacity * coverage);
 
+  // Where an opaque picture covers the visuals, nothing behind it shows: not even its shadow.
+  if (p_blend == 0 && min(a.r, min(a.g, a.b)) >= 1.0) {
+    fragColor = vec4(img, 1.0);
+    return;
+  }
+
   // Lift the picture off the visuals: a shadow that backs every part of it, so even thin
-  // lettering reads over a busy picture, then a rim of neon in the palette's colours.
-  float near = blurredShape(uv, frame, 0.012);
-  float far = blurredShape(uv, frame, 0.045);
+  // lettering reads over a busy picture, then a rim of neon in the palette's colours. Beyond
+  // 0.12 of the screen height outside the picture the rim adds less than 1/10000, so it is not
+  // read there, and neither shape is read when both are off.
+  float outside = p_fit == 3 ? 0.0 : length((uv - clamp(uv, 0.0, 1.0)) * frame);
+  float near = p_glow > 0.0 && outside < 0.12 ? blurredShape(uv, frame, 0.012) : 0.0;
+  float far = p_glow > 0.0 || p_shadow > 0.0 ? blurredShape(uv, frame, 0.045) : 0.0;
   // The visuals are HDR here, often several times brighter than white, so halving them would
   // barely show after tone mapping. Bright light is pulled down harder than dim light.
   float shade = p_shadow * sat(far * 2.5) * p_opacity * 0.9;

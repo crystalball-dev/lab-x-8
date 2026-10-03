@@ -12,12 +12,38 @@ import { GlobalsBuffer } from './GlobalsBuffer';
 import { createGLContext, type GLCaps } from './gl/context';
 import { PingPong, RenderTarget, type TargetFormat } from './gl/RenderTarget';
 import { Texture } from './gl/Texture';
+import { imageReach, type LayerReach } from './imageReach';
 import { TransitionPass } from './TransitionPass';
 
 const NOISE_SIZE = 256;
 const PALETTE_WIDTH = 256;
-/** Images larger than this on either side are downscaled before upload. */
+/** Pictures larger than this on either side are downscaled before upload. */
 export const MAX_IMAGE_SIZE = 4096;
+
+/** The settings of an image layer that the renderer reads every frame, by parameter path. */
+const REACH_KEYS: Array<keyof LayerReach> = [
+  'opacity',
+  'fit',
+  'scale',
+  'x',
+  'y',
+  'rotate',
+  'kaleido',
+  'warp',
+  'ripple',
+  'displace',
+  'glitch',
+  'glow',
+  'shadow',
+];
+const LAYER_PATHS = IMAGE_LAYERS.map((layer) => ({
+  id: layer.id,
+  visible: `${layer.id}.visible`,
+  placement: `${layer.id}.placement`,
+  reach: Object.fromEntries(REACH_KEYS.map((key) => [key, `${layer.id}.${key}`])) as Record<keyof LayerReach, string>,
+}));
+/** A layer reaching more of the screen than this draws all of it, which is cheaper than a copy. */
+const WHOLE_SCREEN_SHARE = 0.9;
 
 export interface ImageSource {
   source: TexImageSource;
@@ -42,9 +68,10 @@ export interface Transition {
   style: number;
 }
 
-/** A picture of one image layer. Aspect 0 means the layer is empty. */
+/** The picture of an image layer. */
 interface Picture {
   readonly texture: Texture;
+  /** Width over height. */
   aspect: number;
 }
 
@@ -114,8 +141,13 @@ export class Renderer {
   private readonly audioTextures: AudioTextures;
   private readonly globals: GlobalsBuffer;
   private readonly noise: Texture;
-  /** One per image layer. */
-  private readonly pictures: Picture[];
+  /** One per image layer, null while it is empty. Only loaded pictures take memory. */
+  private readonly pictures: Array<Picture | null> = IMAGE_LAYERS.map(() => null);
+  /** Bound in place of a picture when no layer has one. */
+  private readonly noPicture: Texture;
+  /** Settings of the image layer being drawn, filled in for every layer. */
+  private readonly reach = Object.fromEntries(REACH_KEYS.map((key) => [key, 0])) as unknown as LayerReach;
+  private readonly layerUniforms = { u_layerAspect: 1 };
   private readonly vao: WebGLVertexArrayObject;
 
   private transitionId = 0;
@@ -142,8 +174,9 @@ export class Renderer {
 
     this.globals = new GlobalsBuffer(gl);
 
-    // Compile everything up front so switching patterns during a set never hitches.
-    for (const def of [...GENERATORS, ...Object.values(STAGES), ...IMAGE_LAYERS.slice(1)]) {
+    // Compile everything up front so switching patterns during a set never hitches. The image
+    // layers all draw with the image stage.
+    for (const def of [...GENERATORS, ...Object.values(STAGES)]) {
       this.passes.set(def.id, new EffectPass(gl, def));
     }
     this.bloom = new BloomStage(gl);
@@ -172,20 +205,8 @@ export class Renderer {
     for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.floor(rng() * 256);
     this.noise.allocate(NOISE_SIZE, NOISE_SIZE, noiseData);
 
-    // Premultiplied and still sRGB encoded, so transparent edges filter and mip cleanly.
-    // Shaders read them through imageAt(), which undoes both.
-    this.pictures = IMAGE_LAYERS.map(() => {
-      const texture = new Texture(gl, {
-        internalFormat: gl.RGBA8,
-        format: gl.RGBA,
-        type: gl.UNSIGNED_BYTE,
-        wrapS: gl.MIRRORED_REPEAT,
-        wrapT: gl.MIRRORED_REPEAT,
-        mipmaps: true,
-      });
-      texture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
-      return { texture, aspect: 0 };
-    });
+    this.noPicture = this.createPictureTexture();
+    this.noPicture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
 
     this.subscriptions.push(
       params.subscribe((path) => {
@@ -245,19 +266,47 @@ export class Renderer {
 
   /** Installs a picture in an image layer, or empties the layer when `image` is null. */
   setImage(layer: number, image: ImageSource | null): void {
-    const picture = this.pictures[layer]!;
+    let picture = this.pictures[layer];
     if (!image) {
-      picture.texture.allocate(1, 1, new Uint8Array([0, 0, 0, 255]));
-      picture.aspect = 0;
+      picture?.texture.dispose();
+      this.pictures[layer] = null;
       return;
+    }
+    if (!picture) {
+      picture = { texture: this.createPictureTexture(), aspect: 1 };
+      this.pictures[layer] = picture;
     }
     picture.texture.upload(image.source, image.width, image.height, image.flipY, true);
     picture.aspect = image.width / image.height;
   }
 
+  /** Exchanges the pictures of two image layers, as moving a layer up or down does. */
+  swapImages(a: number, b: number): void {
+    const picture = this.pictures[a] ?? null;
+    this.pictures[a] = this.pictures[b] ?? null;
+    this.pictures[b] = picture;
+  }
+
+  /**
+   * Premultiplied and still sRGB encoded, so transparent edges filter and mip cleanly. Shaders
+   * read pictures through imageAt(), which undoes both.
+   */
+  private createPictureTexture(): Texture {
+    const gl = this.gl;
+    return new Texture(gl, {
+      internalFormat: gl.RGBA8,
+      format: gl.RGBA,
+      type: gl.UNSIGNED_BYTE,
+      wrapS: gl.MIRRORED_REPEAT,
+      wrapT: gl.MIRRORED_REPEAT,
+      mipmaps: true,
+    });
+  }
+
   /** The picture the tunnel's image walls show: the first one loaded. */
-  private get wall(): Picture {
-    return this.pictures.find((p) => p.aspect > 0) ?? this.pictures[0]!;
+  private get wall(): Picture | null {
+    for (const picture of this.pictures) if (picture) return picture;
+    return null;
   }
 
   /** Clears all temporal state: feedback history and the spectrogram. */
@@ -280,7 +329,7 @@ export class Renderer {
     this.globals.update(frame, {
       historyRow: this.audioTextures.historyRow,
       historyFraction: this.audioTextures.historyFraction,
-      imageAspect: this.wall.aspect,
+      imageAspect: this.wall?.aspect ?? 0,
       outputWidth: this.outputWidth,
       outputHeight: this.outputHeight,
     });
@@ -317,25 +366,11 @@ export class Renderer {
   private drawLook(p: ParamStore, look: LookState, target: RenderTarget | null): void {
     if (look.paletteDirty) this.updatePalette(look, p);
     look.palette.bind(4);
-    this.wall.texture.bind(5);
+    (this.wall?.texture ?? this.noPicture).bind(5);
 
     const chain = this.chain;
     // Runs one stage of the chain and returns its result.
-    const stage = (id: string, inputs: Record<string, Texture>, uniforms?: Record<string, number>): Texture => {
-      this.pass(id).draw(chain.write, inputs, p, 0, 0, uniforms);
-      chain.swap();
-      return chain.read.texture;
-    };
-    // Draws the image layers placed at one point of the chain, in layer order.
-    const images = (placement: string): void => {
-      IMAGE_LAYERS.forEach((layer, i) => {
-        const picture = this.pictures[i]!;
-        if (picture.aspect === 0 || p.num(`${layer.id}.opacity`) <= 0.001) return;
-        if (p.str(`${layer.id}.placement`) !== placement) return;
-        picture.texture.bind(5);
-        current = stage(layer.id, { u_input: current }, { u_layerAspect: picture.aspect });
-      });
-    };
+    const stage = (id: string, inputs: Record<string, Texture>): Texture => this.stage(p, id, inputs);
 
     // --- generators ----------------------------------------------------------------------------
     this.pass(`gen.${p.str('layers.a')}`).draw(this.genA, {}, p);
@@ -347,7 +382,7 @@ export class Renderer {
     }
 
     // --- images in the scene ---------------------------------------------------------------------
-    images('scene');
+    current = this.drawImages(p, 'scene', current);
 
     // --- feedback ------------------------------------------------------------------------------
     const feedbackOn = p.num('feedback.amount') > 0.001;
@@ -378,7 +413,7 @@ export class Renderer {
     // --- images on top ----------------------------------------------------------------------------
     // After every effect that would smear or recolour them, and outside the feedback loop, but
     // still on the screen they are shown on.
-    images('top');
+    current = this.drawImages(p, 'top', current);
 
     // --- display -------------------------------------------------------------------------------
     if (p.num('crt.amount') > 0.001) {
@@ -386,6 +421,65 @@ export class Renderer {
       current = this.full.texture;
     }
     this.pass('output').draw(target, { u_input: current }, p, this.outputWidth, this.outputHeight);
+  }
+
+  /** Runs one stage of the chain and returns its result. */
+  private stage(
+    p: ParamStore,
+    id: string,
+    inputs: Record<string, Texture>,
+    uniforms?: Record<string, number>,
+    group?: string,
+  ): Texture {
+    this.pass(id).draw(this.chain.write, inputs, p, 0, 0, uniforms, group);
+    this.chain.swap();
+    return this.chain.read.texture;
+  }
+
+  /**
+   * Draws the image layers placed at one point of the chain over `current`, in layer order, and
+   * returns the result.
+   *
+   * A layer is only drawn where it can reach: its picture and as far as its effects carry it.
+   * Most reach a small part of the screen and are drawn in place. That part is copied aside
+   * first, for the layer to read while it draws over it.
+   */
+  private drawImages(p: ParamStore, placement: string, current: Texture): Texture {
+    const gl = this.gl;
+    const chain = this.chain;
+    const width = this.sceneWidth;
+    const height = this.sceneHeight;
+    const reach = this.reach;
+    this.pictures.forEach((picture, i) => {
+      if (!picture) return;
+      const paths = LAYER_PATHS[i]!;
+      if (!p.bool(paths.visible) || p.str(paths.placement) !== placement) return;
+      for (const key of REACH_KEYS) reach[key] = p.num(paths.reach[key]);
+      if (reach.opacity <= 0.001) return;
+      const box = imageReach(reach, picture.aspect, this.outputWidth / this.outputHeight);
+      if (!box) return;
+
+      picture.texture.bind(5);
+      this.layerUniforms.u_layerAspect = picture.aspect;
+      // Whole pixels, and a little more for the antialiased edge.
+      const x0 = Math.max(0, Math.floor(box.x0 * width) - 2);
+      const y0 = Math.max(0, Math.floor(box.y0 * height) - 2);
+      const x1 = Math.min(width, Math.ceil(box.x1 * width) + 2);
+      const y1 = Math.min(height, Math.ceil(box.y1 * height) + 2);
+      const holder =
+        current === this.genA.texture ? this.genA : current === chain.read.texture ? chain.read : null;
+      if (!holder || (x1 - x0) * (y1 - y0) >= width * height * WHOLE_SCREEN_SHARE) {
+        current = this.stage(p, 'image', { u_input: current }, this.layerUniforms, paths.id);
+        return;
+      }
+      const aside = chain.write;
+      this.copy(holder, aside, x0, y0, x1, y1);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(x0, y0, x1 - x0, y1 - y0);
+      this.pass('image').draw(holder, { u_input: aside.texture }, p, 0, 0, this.layerUniforms, paths.id);
+      gl.disable(gl.SCISSOR_TEST);
+    });
+    return current;
   }
 
   private pass(id: string): EffectPass {
@@ -416,14 +510,22 @@ export class Renderer {
     }
   }
 
-  /** Copies a scene-sized target into another, such as a feedback history. */
-  private copy(source: RenderTarget, destination: RenderTarget): void {
+  /**
+   * Copies a scene-sized target into another, such as a feedback history, or only the
+   * rectangle from x0, y0 to x1, y1 of it.
+   */
+  private copy(
+    source: RenderTarget,
+    destination: RenderTarget,
+    x0 = 0,
+    y0 = 0,
+    x1 = this.sceneWidth,
+    y1 = this.sceneHeight,
+  ): void {
     const gl = this.gl;
-    const w = this.sceneWidth;
-    const h = this.sceneHeight;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.blitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, gl.COLOR_BUFFER_BIT, gl.NEAREST);
   }
 
   private updatePalette(look: LookState, p: ParamStore): void {
@@ -457,7 +559,8 @@ export class Renderer {
     this.audioTextures.dispose();
     this.globals.dispose();
     this.noise.dispose();
-    for (const picture of this.pictures) picture.texture.dispose();
+    for (const picture of this.pictures) picture?.texture.dispose();
+    this.noPicture.dispose();
     this.gl.deleteVertexArray(this.vao);
   }
 }

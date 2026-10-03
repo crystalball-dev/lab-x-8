@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ParamStore, hexToLinear } from '../src/params/ParamStore';
 import { PALETTES, renderPalette } from '../src/params/palettes';
+import { IMAGE_LAYERS } from '../src/effects/stages';
 import { upgradePreset } from '../src/params/presets';
 import { RESOLUTIONS, createParamStore, outputSize, parseResolution, randomizeLook } from '../src/params/schema';
 import { createRng } from '../src/util/math';
@@ -206,6 +207,24 @@ describe('ParamStore presets', () => {
     expect(store.getMod('picture.size')).toEqual({ source: 'snare', amount: 0.5 });
   });
 
+  it('stores an optional group still at its defaults as its first value alone', () => {
+    const store = createStore();
+    expect(Object.keys(store.snapshot().values).filter((path) => path.startsWith('picture.'))).toEqual(['picture.size']);
+    expect(store.snapshot().mods?.['picture.size']).toBeUndefined();
+
+    // Loading that brings the group back to its defaults, as a full snapshot would.
+    const untouched = store.snapshot();
+    store.set('picture.spot', 0.5);
+    store.load(untouched);
+    expect(store.get('picture.spot')).toBe(0);
+
+    // Once anything in it changes, a modulation route included, all of it is stored.
+    store.setMod('picture.size', null);
+    const changed = store.snapshot();
+    expect(changed.values).toMatchObject({ 'picture.size': 1, 'picture.spot': 0 });
+    expect(changed.mods?.['picture.size']).toEqual({ source: 'none', amount: 0 });
+  });
+
   it('applies optional groups when the preset stores them, defaulting what it leaves out', () => {
     const store = createStore();
     store.set('picture.spot', 0.5);
@@ -282,11 +301,57 @@ describe('Preset upgrade', () => {
 });
 
 describe('Image layers', () => {
-  it('start in different places, so a second picture does not cover the first', () => {
+  it('number twenty, from image to image20', () => {
+    expect(IMAGE_LAYERS).toHaveLength(20);
+    expect(IMAGE_LAYERS[0]!.id).toBe('image');
+    expect(IMAGE_LAYERS[19]!.id).toBe('image20');
+    expect(new Set(IMAGE_LAYERS.map((layer) => layer.id)).size).toBe(20);
+  });
+
+  it('start in different places, so a new picture does not cover the ones before it', () => {
     const store = createParamStore();
     expect([store.get('image.x'), store.get('image.y'), store.get('image.scale')]).toEqual([0, 0, 0.8]);
     expect([store.get('image2.x'), store.get('image2.y'), store.get('image2.scale')]).toEqual([0.62, -0.68, 0.3]);
     expect([store.get('image3.x'), store.get('image4.y')]).toEqual([-0.62, 0.68]);
+    expect([store.get('image5.x'), store.get('image5.y'), store.get('image5.scale')]).toEqual([-0.62, 0.68, 0.3]);
+
+    const places = IMAGE_LAYERS.map((layer) => `${store.get(`${layer.id}.x`)},${store.get(`${layer.id}.y`)}`);
+    expect(new Set(places).size).toBe(IMAGE_LAYERS.length);
+    for (const layer of IMAGE_LAYERS.slice(5)) {
+      expect(Math.abs(store.get(`${layer.id}.x`) as number)).toBeLessThanOrEqual(0.8);
+      expect(Math.abs(store.get(`${layer.id}.y`) as number)).toBeLessThanOrEqual(0.8);
+      expect(store.get(`${layer.id}.scale`)).toBe(0.2);
+    }
+  });
+
+  it('keep presets small: a layer nobody has set up is one value', () => {
+    const store = createParamStore();
+    store.set('image7.x', 0.25);
+    const values = Object.keys(store.snapshot().values);
+    const perLayer = IMAGE_LAYERS[6]!.params.length;
+    expect(values.filter((path) => path.startsWith('image7.'))).toHaveLength(perLayer);
+    expect(values.filter((path) => path.startsWith('image8.'))).toEqual(['image8.placement']);
+    expect(values.filter((path) => path.startsWith('image'))).toHaveLength(IMAGE_LAYERS.length - 1 + perLayer);
+  });
+
+  it('change places with their settings, and copy them', () => {
+    const store = createParamStore();
+    store.set('image2.x', -0.4);
+    store.set('image2.visible', false);
+    store.setMod('image2.scale', { source: 'snare', amount: 0.5 });
+    store.set('image3.blend', 'screen');
+    store.swapGroups('image2', 'image3');
+    expect([store.get('image3.x'), store.get('image3.visible')]).toEqual([-0.4, false]);
+    expect(store.getMod('image3.scale')).toEqual({ source: 'snare', amount: 0.5 });
+    expect([store.get('image2.blend'), store.get('image2.x'), store.get('image2.visible')]).toEqual(['screen', -0.62, true]);
+    expect(store.getMod('image2.scale')).toEqual({ source: 'kick', amount: 0.02 });
+
+    store.copyGroup('image3', 'image9');
+    expect([store.get('image9.x'), store.get('image9.visible')]).toEqual([-0.4, false]);
+    expect(store.getMod('image9.scale')).toEqual({ source: 'snare', amount: 0.5 });
+    // A copy, not a link.
+    store.set('image3.x', 0.1);
+    expect(store.get('image9.x')).toBe(-0.4);
   });
 
   it('keep their settings through presets that do not store them, and through Random', () => {

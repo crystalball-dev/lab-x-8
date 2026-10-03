@@ -7,15 +7,38 @@ import { storage } from '../util/storage';
 import { createParamRow, type ParamRow } from './ParamRow';
 
 const OPEN_KEY = 'lab-x-8.panel.open.v1';
+/** Carries the number of an image layer while it is dragged to another place. */
+const LAYER_DRAG = 'application/x-lab-x-8-layer';
 /** Sections that start expanded on first launch. */
 const DEFAULT_OPEN = ['tempo', 'layers', 'color', 'crt'];
 
+/** What the panel shows of the picture in an image layer. */
+export interface LayerPicture {
+  name: string;
+  /** A small preview, as a URL. */
+  thumbnail: string;
+}
+
 export interface PanelActions {
   tapTempo(): void;
+  /** Asks for a picture to put into an image layer. */
   loadImage(layer: number): void;
+  /** Asks for pictures to put into the empty image layers. */
+  addImages(): void;
+  /** Pictures dropped on an image layer: the first goes into it, the rest into empty layers. */
+  dropImages(files: File[], layer: number): void;
   useTestCard(layer: number): void;
   removeImage(layer: number): void;
-  hasImage(layer: number): boolean;
+  /** Removes the pictures from every image layer. */
+  clearImages(): void;
+  /** Moves an image layer to another place in the drawing order, with its settings. */
+  moveLayer(from: number, to: number): void;
+  /** Puts a copy of an image layer directly above it. */
+  duplicateLayer(layer: number): void;
+  /** The picture in an image layer, or null when the layer is empty. */
+  picture(layer: number): LayerPicture | null;
+  /** Changes whenever a picture is loaded, removed or moved. */
+  pictureRevision(): number;
   /** One line about the look cycle: what plays, what comes next and when. */
   cycleStatus(): string;
 }
@@ -189,15 +212,145 @@ export class Panel {
     if (focused) body.querySelector<HTMLElement>(`[data-path="${focused}"]`)?.focus();
   }
 
+  /** Rows for the parameters of a group: all of them, or those in `keys` in that order. */
   private addRows(body: HTMLElement, groupId: string, keys?: string[]): void {
     const group = this.params.groups.find((g) => g.id === groupId);
     if (!group) return;
-    for (const def of group.params) {
-      if (keys && !keys.includes(def.key)) continue;
-      const row = createParamRow(this.params, `${groupId}.${def.key}`);
+    for (const key of keys ?? group.params.map((def) => def.key)) {
+      if (!group.params.some((def) => def.key === key)) continue;
+      const row = createParamRow(this.params, `${groupId}.${key}`);
       this.building.push(row);
       body.append(...row.elements);
     }
+  }
+
+  /**
+   * Every image layer, in drawing order: later layers draw over earlier ones. Selecting one
+   * shows its settings, and dragging one to another place moves it there.
+   */
+  private addLayerGrid(body: HTMLElement): void {
+    const count = IMAGE_LAYERS.length;
+    const used = IMAGE_LAYERS.filter((_, i) => this.actions.picture(i)).length;
+    const cells = IMAGE_LAYERS.map((layer, i) => {
+      const picture = this.actions.picture(i);
+      const hidden = !this.params.bool(`${layer.id}.visible`);
+      const state = picture ? `${picture.name}${hidden ? ', hidden' : ''}` : 'empty';
+      const cell = h(
+        'button',
+        {
+          class: `layer-cell${i === this.selectedLayer ? ' active' : ''}${picture ? '' : ' empty'}${hidden ? ' hidden-layer' : ''}`,
+          title: `Layer ${i + 1}: ${state}`,
+          attrs: { type: 'button', 'aria-pressed': String(i === this.selectedLayer) },
+          on: { click: () => this.showImageLayer(i) },
+        },
+        [picture ? h('img', { attrs: { src: picture.thumbnail, alt: '' } }) : null, h('span', { text: String(i + 1) })],
+      );
+      if (picture) {
+        cell.draggable = true;
+        cell.addEventListener('dragstart', (event) => {
+          event.dataTransfer?.setData(LAYER_DRAG, String(i));
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+        });
+      }
+      // A layer dragged from another place moves here. Picture files dropped here load into it.
+      cell.addEventListener('dragover', (event) => {
+        const types = event.dataTransfer?.types ?? [];
+        if (!types.includes(LAYER_DRAG) && !types.includes('Files')) return;
+        event.preventDefault();
+        event.dataTransfer!.dropEffect = types.includes(LAYER_DRAG) ? 'move' : 'copy';
+        cell.classList.add('drop-target');
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
+      cell.addEventListener('drop', (event) => {
+        cell.classList.remove('drop-target');
+        const transfer = event.dataTransfer;
+        if (!transfer) return;
+        event.preventDefault();
+        if (transfer.types.includes(LAYER_DRAG)) {
+          const from = Number(transfer.getData(LAYER_DRAG));
+          if (Number.isInteger(from) && from !== i) this.actions.moveLayer(from, i);
+          return;
+        }
+        const files = [...transfer.files].filter((file) => file.type.startsWith('image/'));
+        if (files.length > 0) this.actions.dropImages(files, i);
+      });
+      return cell;
+    });
+
+    const tools = h('div', { class: 'layer-tools' }, [h('span', { text: `${used} of ${count} in use` })]);
+    if (used < count) {
+      tools.append(
+        h('button', {
+          class: 'text-button',
+          text: 'Add pictures',
+          title: 'Several at once go into the empty layers in turn',
+          attrs: { type: 'button' },
+          on: { click: () => this.actions.addImages() },
+        }),
+      );
+    }
+    if (used > 1) {
+      const clear = h('button', { class: 'text-button danger', text: 'Clear all', attrs: { type: 'button' } });
+      let armed = 0;
+      clear.addEventListener('click', () => {
+        if (armed) {
+          this.actions.clearImages();
+          return;
+        }
+        // A second click within a few seconds clears, so one slip does not lose every picture.
+        clear.textContent = `Click again to remove ${used}`;
+        clear.classList.add('armed');
+        armed = window.setTimeout(() => {
+          armed = 0;
+          clear.textContent = 'Clear all';
+          clear.classList.remove('armed');
+        }, 3000);
+      });
+      tools.append(clear);
+    }
+    body.append(h('div', { class: 'layer-grid', attrs: { role: 'group', 'aria-label': 'Image layers' } }, cells), tools);
+  }
+
+  /** The selected layer's picture, and its place in the drawing order. */
+  private addLayerControls(body: HTMLElement): void {
+    const count = IMAGE_LAYERS.length;
+    const layer = this.selectedLayer;
+    const picture = this.actions.picture(layer);
+    body.append(
+      h('div', { class: 'layer-name' }, [
+        h('strong', { text: `Layer ${layer + 1}` }),
+        h('span', { text: picture ? picture.name : 'Empty', title: picture?.name ?? '' }),
+      ]),
+    );
+    if (!picture) {
+      body.append(
+        h('div', { class: 'button-row' }, [
+          button('Load image', () => this.actions.loadImage(layer), '', `A picture for layer ${layer + 1}`),
+          button('Test card', () => this.actions.useTestCard(layer), '', 'A generated TV test card'),
+        ]),
+        h('div', {
+          class: 'note',
+          text: `Layer ${layer + 1} is empty. Load a picture here, or add several at once, or drop them onto the screen: they fill the empty layers in turn. Transparent PNGs keep their transparency, which suits logos.`,
+        }),
+      );
+      return;
+    }
+    const back = button('Back', () => this.actions.moveLayer(layer, layer - 1), '', `Draw under layer ${layer}`);
+    back.disabled = layer === 0;
+    const forward = button('Forward', () => this.actions.moveLayer(layer, layer + 1), '', `Draw over layer ${layer + 2}`);
+    forward.disabled = layer === count - 1;
+    body.append(
+      h('div', { class: 'button-row' }, [
+        back,
+        forward,
+        button('Duplicate', () => this.actions.duplicateLayer(layer), '', 'A copy with the same settings, right above this layer'),
+      ]),
+      h('div', { class: 'button-row' }, [
+        button('Replace', () => this.actions.loadImage(layer), '', `Another picture for layer ${layer + 1}, with the same settings`),
+        button('Test card', () => this.actions.useTestCard(layer), '', 'A generated TV test card'),
+        button('Remove', () => this.actions.removeImage(layer), '', 'Empties the layer. Its settings stay.'),
+      ]),
+    );
   }
 
   private addGenerator(body: HTMLElement, slot: string, shortId: string): void {
@@ -303,39 +456,15 @@ export class Panel {
         title: 'Image',
         // The reset button resets the layer on show.
         groups: () => [IMAGE_LAYERS[this.selectedLayer]!.id],
+        // The grid shows which layers are hidden.
         layout: () =>
-          `${this.selectedLayer}:${IMAGE_LAYERS.map((_, i) => (this.actions.hasImage(i) ? 1 : 0)).join('')}`,
+          `${this.selectedLayer}:${this.actions.pictureRevision()}:${IMAGE_LAYERS.map((l) => Number(p.bool(`${l.id}.visible`))).join('')}`,
         build: (body) => {
           const layer = this.selectedLayer;
           const group = IMAGE_LAYERS[layer]!.id;
-          const tabs = IMAGE_LAYERS.map((_, i) => {
-            const loaded = this.actions.hasImage(i);
-            const tab = button(
-              String(i + 1),
-              () => this.showImageLayer(i),
-              `${i === layer ? 'active' : ''} ${loaded ? 'loaded' : ''}`,
-              `Image layer ${i + 1}${loaded ? '' : ', empty'}`,
-            );
-            tab.setAttribute('aria-pressed', String(i === layer));
-            return tab;
-          });
-          body.append(
-            h('div', { class: 'layer-tabs', attrs: { role: 'group', 'aria-label': 'Image layers' } }, tabs),
-            h('div', { class: 'button-row' }, [
-              button('Load image', () => this.actions.loadImage(layer)),
-              button('Test card', () => this.actions.useTestCard(layer), '', 'A generated TV test card'),
-              button('Remove', () => this.actions.removeImage(layer)),
-            ]),
-          );
-          if (!this.actions.hasImage(layer)) {
-            body.append(
-              h('div', {
-                class: 'note',
-                text: `Layer ${layer + 1} is empty. Load a picture here, or drop pictures onto the screen: several at once fill the empty layers. Transparent PNGs keep their transparency, which suits logos.`,
-              }),
-            );
-          }
-          this.addRows(body, group, ['placement', 'blend', 'opacity']);
+          this.addLayerGrid(body);
+          this.addLayerControls(body);
+          this.addRows(body, group, ['visible', 'placement', 'blend', 'opacity']);
           body.append(h('div', { class: 'subhead', text: 'Size and position' }));
           this.addRows(body, group, ['fit', 'scale', 'x', 'y', 'rotate', 'kaleido']);
           body.append(h('div', { class: 'subhead', text: 'Light' }));

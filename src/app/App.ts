@@ -7,7 +7,7 @@ import { exportVideo, sliceBuffer } from '../export/exportVideo';
 import type { ExportResult, FrameSink } from '../export/types';
 import { GENERATORS } from '../effects/generators';
 import { IMAGE_LAYERS } from '../effects/stages';
-import { MAX_IMAGE_SIZE, Renderer, type ImageSource } from '../gfx/Renderer';
+import { Renderer, type ImageSource } from '../gfx/Renderer';
 import { PresetManager, upgradePreset } from '../params/presets';
 import { createParamStore, outputSize, randomizeLook } from '../params/schema';
 import type { PresetData } from '../params/types';
@@ -15,15 +15,16 @@ import { publisherLink, wordmark } from '../ui/brand';
 import { ExportDialog, type ExportRequest } from '../ui/ExportDialog';
 import { Header } from '../ui/Header';
 import { Hud, shortGpuName, type HudStats } from '../ui/Hud';
-import { Panel } from '../ui/Panel';
+import { Panel, type LayerPicture } from '../ui/Panel';
 import { mountToasts, toast, toastError } from '../ui/toast';
 import { debounce } from '../util/async';
-import { downloadBlob, h, pickFile } from '../util/dom';
+import { downloadBlob, h, pickFile, pickFiles } from '../util/dom';
 import { createRng } from '../util/math';
 import { storage } from '../util/storage';
 import { FrameClock } from './FrameClock';
 import { FrameStats } from './FrameStats';
 import { LookCycler } from './LookCycler';
+import { decodePicture, thumbnail } from './pictures';
 import { createTestCard } from './testCard';
 
 const STATE_KEY = 'lab-x-8.state.v1';
@@ -31,6 +32,12 @@ const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
 /** Settings that change the size of the picture. */
 const SIZE_SETTINGS = new Set(['system.resolution', 'system.width', 'system.height', 'system.renderScale']);
 const IMAGE_TYPES = 'image/*';
+
+/** A picture in an image layer, and where it came from, to load it again into a new graphics context. */
+interface LoadedPicture extends LayerPicture {
+  /** The file it was read from, or null for the test card. */
+  file: File | null;
+}
 
 /**
  * Composition root. Owns the long-lived objects, wires them together and runs the frame loop.
@@ -58,7 +65,9 @@ export class App {
   private readonly rng = createRng((Date.now() ^ 0x9e3779b9) >>> 0);
 
   /** The picture in each image layer, or null for an empty layer. */
-  private readonly images: Array<ImageSource | null> = IMAGE_LAYERS.map(() => null);
+  private readonly pictures: Array<LoadedPicture | null> = IMAGE_LAYERS.map(() => null);
+  /** Changes whenever a picture is loaded, removed or moved. */
+  private pictureRevision = 0;
   private appliedResolution = '';
   private exporting = false;
   private contextLost = false;
@@ -121,10 +130,15 @@ export class App {
     this.panel = new Panel(this.params, {
       tapTempo: () => this.tapTempo(),
       loadImage: (layer) => void this.pickImage(layer),
-      useTestCard: (layer) =>
-        this.setImage(layer, { source: createTestCard(), width: 1920, height: 1080, flipY: true }),
-      removeImage: (layer) => this.setImage(layer, null),
-      hasImage: (layer) => this.images[layer] !== null,
+      addImages: () => void this.pickImages(),
+      dropImages: (files, layer) => void this.dropImages(files, layer),
+      useTestCard: (layer) => this.useTestCard(layer),
+      removeImage: (layer) => this.setPicture(layer, null, null),
+      clearImages: () => this.clearPictures(),
+      moveLayer: (from, to) => this.moveLayer(from, to),
+      duplicateLayer: (layer) => void this.duplicateLayer(layer),
+      picture: (layer) => this.pictures[layer] ?? null,
+      pictureRevision: () => this.pictureRevision,
       cycleStatus: () => this.cycler.describe(),
     });
     this.side = h('aside', { class: 'panel' }, [this.header.element, this.panel.element]);
@@ -243,55 +257,178 @@ export class App {
 
   // --- image -------------------------------------------------------------------------------------
 
-  private setImage(layer: number, image: ImageSource | null): void {
-    // The bitmap is kept to restore a lost graphics context. A replaced one can go.
-    const previous = this.images[layer];
-    if (previous?.source instanceof ImageBitmap) previous.source.close();
-    this.images[layer] = image;
+  /** Puts a picture into an image layer, or empties the layer. */
+  private setPicture(layer: number, picture: LoadedPicture | null, image: ImageSource | null): void {
+    this.pictures[layer] = picture;
+    this.pictureRevision++;
     this.renderer.setImage(layer, image);
     this.panel.rebuild();
   }
 
-  private async pickImage(layer: number): Promise<void> {
-    const file = await pickFile(IMAGE_TYPES);
-    if (file) await this.loadImage(file, layer);
+  private useTestCard(layer: number): void {
+    const card = createTestCard();
+    this.setPicture(
+      layer,
+      { name: 'Test card', thumbnail: thumbnail(card, card.width, card.height, false), file: null },
+      { source: card, width: card.width, height: card.height, flipY: true },
+    );
+  }
+
+  private clearPictures(): void {
+    this.pictures.forEach((picture, layer) => {
+      if (picture) this.setPicture(layer, null, null);
+    });
   }
 
   /**
-   * Puts dropped pictures into the empty image layers in turn. With every layer taken, the
-   * first replaces the picture of the layer shown in the panel.
+   * Moves an image layer to another place in the drawing order, its picture and settings
+   * together. The layers in between move one place towards where it was.
    */
-  private async dropImages(files: File[]): Promise<void> {
-    const empty = this.images.flatMap((image, layer) => (image ? [] : [layer]));
-    const layers = empty.length > 0 ? empty : [this.panel.imageLayer];
-    const fitting = files.slice(0, layers.length);
-    for (const [i, file] of fitting.entries()) await this.loadImage(file, layers[i]!);
-    this.panel.showImageLayer(layers[fitting.length - 1]!);
-    const left = files.length - fitting.length;
-    if (left > 0) toast(`${left} more picture${left === 1 ? '' : 's'} did not fit. There are ${IMAGE_LAYERS.length} image layers.`);
+  private moveLayer(from: number, to: number): void {
+    const step = Math.sign(to - from);
+    for (let i = from; i !== to; i += step) {
+      const j = i + step;
+      const picture = this.pictures[i] ?? null;
+      this.pictures[i] = this.pictures[j] ?? null;
+      this.pictures[j] = picture;
+      this.renderer.swapImages(i, j);
+      this.params.swapGroups(IMAGE_LAYERS[i]!.id, IMAGE_LAYERS[j]!.id);
+    }
+    this.pictureRevision++;
+    this.panel.showImageLayer(to);
   }
 
-  private async loadImage(file: File, layer: number): Promise<void> {
-    try {
-      // Bitmaps ignore the GL flip and premultiply flags, so both are baked in while decoding.
-      const decode: ImageBitmapOptions = { imageOrientation: 'flipY', premultiplyAlpha: 'premultiply' };
-      let bitmap = await createImageBitmap(file, decode);
-      const scale = Math.min(1, MAX_IMAGE_SIZE / Math.max(bitmap.width, bitmap.height));
-      if (scale < 1) {
-        const width = Math.round(bitmap.width * scale);
-        const height = Math.round(bitmap.height * scale);
-        bitmap.close();
-        bitmap = await createImageBitmap(file, {
-          ...decode,
-          resizeWidth: width,
-          resizeHeight: height,
-          resizeQuality: 'high',
-        });
+  /** Puts a copy of an image layer directly above it: the same picture, with the same settings. */
+  private async duplicateLayer(layer: number): Promise<void> {
+    const picture = this.pictures[layer];
+    if (!picture) return;
+    // Make room right above it, from the nearest empty layer above, or else below.
+    const empty = this.pictures.flatMap((other, i) => (other ? [] : [i]));
+    const above = empty.find((i) => i > layer);
+    const below = empty.filter((i) => i < layer).at(-1);
+    let original = layer;
+    if (above !== undefined) {
+      this.moveLayer(above, layer + 1);
+    } else if (below !== undefined) {
+      this.moveLayer(below, layer);
+      original = layer - 1;
+    } else {
+      toast(`All ${IMAGE_LAYERS.length} image layers are in use.`);
+      return;
+    }
+    const copy = original + 1;
+    if (picture.file) {
+      if (!(await this.loadImage(picture.file, copy))) {
+        toastError(new Error(`"${picture.name}" could not be read again.`));
+        return;
       }
-      this.setImage(layer, { source: bitmap, width: bitmap.width, height: bitmap.height, flipY: false });
-      toast(`Image ${layer + 1}: ${file.name}`);
+    } else {
+      this.useTestCard(copy);
+    }
+    this.params.copyGroup(IMAGE_LAYERS[original]!.id, IMAGE_LAYERS[copy]!.id);
+    this.panel.showImageLayer(copy);
+    toast(`Image ${copy + 1}: a copy of image ${original + 1}`);
+  }
+
+  private async pickImage(layer: number): Promise<void> {
+    const file = await pickFile(IMAGE_TYPES);
+    if (!file) return;
+    if (await this.loadImage(file, layer)) toast(`Image ${layer + 1}: ${file.name}`);
+    else toastError(new Error(`"${file.name}" could not be read as an image.`));
+  }
+
+  private async pickImages(): Promise<void> {
+    const files = await pickFiles(IMAGE_TYPES);
+    if (files.length > 0) await this.addImages(files);
+  }
+
+  /**
+   * Puts pictures into the empty image layers in turn, and shows the first in the panel. With
+   * every layer taken, the first replaces the picture of the layer shown in the panel.
+   */
+  private async addImages(files: File[]): Promise<void> {
+    const empty = this.pictures.flatMap((picture, layer) => (picture ? [] : [layer]));
+    const layers = empty.length > 0 ? empty : [this.panel.imageLayer];
+    const fitting = files.slice(0, layers.length);
+    const loaded: number[] = [];
+    const failed: string[] = [];
+    for (const [i, file] of fitting.entries()) {
+      if (await this.loadImage(file, layers[i]!)) loaded.push(layers[i]!);
+      else failed.push(file.name);
+    }
+
+    const first = loaded[0];
+    if (first !== undefined) {
+      this.panel.showImageLayer(first);
+      toast(
+        loaded.length === 1
+          ? `Image ${first + 1}: ${this.pictures[first]!.name}`
+          : `${loaded.length} pictures, in image layers ${first + 1} to ${loaded.at(-1)! + 1}`,
+      );
+    }
+    const left = files.length - fitting.length;
+    if (left > 0) {
+      toast(`${left} more picture${left === 1 ? '' : 's'} did not fit. All ${IMAGE_LAYERS.length} image layers are in use.`);
+    }
+    if (failed.length > 0) {
+      const more = failed.length > 1 ? ` and ${failed.length - 1} more` : '';
+      toastError(new Error(`"${failed[0]}"${more} could not be read as ${more ? 'images' : 'an image'}.`));
+    }
+  }
+
+  /** Pictures dropped on an image layer in the panel: the first goes into it, the rest into empty layers. */
+  private async dropImages(files: File[], layer: number): Promise<void> {
+    const [first, ...rest] = files;
+    if (!first) return;
+    if (await this.loadImage(first, layer)) toast(`Image ${layer + 1}: ${first.name}`);
+    else toastError(new Error(`"${first.name}" could not be read as an image.`));
+    if (rest.length > 0) await this.addImages(rest);
+    this.panel.showImageLayer(layer);
+  }
+
+  /** Loads a picture file into an image layer. Returns false when it cannot be read. */
+  private async loadImage(file: File, layer: number): Promise<boolean> {
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await decodePicture(file);
     } catch {
-      toastError(new Error(`"${file.name}" could not be read as an image.`));
+      return false;
+    }
+    const { width, height } = bitmap;
+    this.setPicture(
+      layer,
+      { name: file.name, thumbnail: thumbnail(bitmap, width, height, true), file },
+      { source: bitmap, width, height, flipY: false },
+    );
+    // The graphics card has its own copy now. A new graphics context reads the file again.
+    bitmap.close();
+    return true;
+  }
+
+  /** Loads every picture again into a new renderer, after the graphics context was lost. */
+  private async reloadPictures(): Promise<void> {
+    for (const [layer, picture] of this.pictures.entries()) {
+      if (!picture) continue;
+      if (!picture.file) {
+        const card = createTestCard();
+        this.renderer.setImage(layer, { source: card, width: card.width, height: card.height, flipY: true });
+        continue;
+      }
+      let bitmap: ImageBitmap | null = null;
+      try {
+        bitmap = await decodePicture(picture.file);
+      } catch {
+        // The file has gone since it was loaded.
+      }
+      // Unless the layer has been given another picture in the meantime.
+      if (this.pictures[layer] === picture) {
+        if (bitmap) {
+          this.renderer.setImage(layer, { source: bitmap, width: bitmap.width, height: bitmap.height, flipY: false });
+        } else {
+          this.setPicture(layer, null, null);
+        }
+      }
+      bitmap?.close();
     }
   }
 
@@ -492,7 +629,7 @@ export class App {
       const files = [...(event.dataTransfer?.files ?? [])];
       const pictures = files.filter((file) => file.type.startsWith('image/'));
       if (pictures.length > 0) {
-        void this.dropImages(pictures);
+        void this.addImages(pictures);
       } else if (files[0]) {
         this.audio
           .useFile(files[0])
@@ -509,9 +646,9 @@ export class App {
     });
     this.canvas.addEventListener('webglcontextrestored', () => {
       this.renderer = this.createRenderer();
-      this.images.forEach((image, layer) => this.renderer.setImage(layer, image));
       this.applyResolution();
       this.contextLost = false;
+      void this.reloadPictures();
       toast('Graphics context restored');
     });
   }

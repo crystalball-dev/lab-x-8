@@ -701,34 +701,156 @@ details.section > summary .reset:hover {
   line-height: 1.4;
 }
 
-/* Tabs for the image layers. A dot marks a layer that holds a picture. */
-.layer-tabs {
-  display: flex;
-  gap: 6px;
+/* The image layers in drawing order, later ones over earlier ones. */
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
 }
 
-.layer-tabs .btn {
-  flex: 1;
+.layer-cell {
   position: relative;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--void);
+  color: var(--muted);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s,
+    opacity 0.12s;
 }
 
-.layer-tabs .btn.active {
-  border-color: var(--sec);
-  color: var(--sec);
-  background: color-mix(in srgb, var(--sec) 14%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--sec) 35%, transparent);
+.layer-cell img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
-.layer-tabs .btn.loaded::after {
-  content: '';
+/* The layer number, in the corner of a picture. */
+.layer-cell span {
   position: absolute;
-  top: 4px;
-  right: 5px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--sec);
-  box-shadow: 0 0 6px var(--sec);
+  left: 0;
+  bottom: 0;
+  padding: 0 4px;
+  border-top-right-radius: var(--radius);
+  background: rgba(6, 2, 12, 0.8);
+  font: 700 10px/14px var(--mono);
+  color: var(--text);
+  pointer-events: none;
+}
+
+.layer-cell.empty {
+  border-style: dashed;
+  background: transparent;
+}
+
+.layer-cell.empty span {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.layer-cell.hidden-layer img {
+  opacity: 0.25;
+}
+
+.layer-cell.hidden-layer span {
+  text-decoration: line-through;
+}
+
+.layer-cell:hover {
+  border-color: var(--sec);
+}
+
+.layer-cell:focus-visible {
+  outline: 2px solid var(--sec);
+  outline-offset: 1px;
+}
+
+.layer-cell.active {
+  border-color: var(--sec);
+  box-shadow:
+    0 0 0 1px var(--sec),
+    0 0 10px color-mix(in srgb, var(--sec) 60%, transparent);
+}
+
+.layer-cell.active span {
+  color: var(--sec);
+}
+
+/* Where a dragged layer will go. */
+.layer-cell.drop-target {
+  border-color: var(--acid);
+  box-shadow: 0 0 12px rgba(198, 255, 0, 0.6);
+}
+
+.layer-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.layer-tools > span {
+  flex: 1;
+}
+
+.text-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: 700 10.5px var(--display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  color: var(--sec);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--sec) 60%, transparent);
+}
+
+.text-button.danger:hover,
+.text-button.armed {
+  color: var(--laser);
+  text-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
+}
+
+/* The selected layer: its number and the name of its picture. */
+.layer-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.layer-name strong {
+  flex: none;
+  font: 700 12px var(--display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sec);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--sec) 45%, transparent);
+}
+
+.layer-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
 }
 
 /* What the look cycle is playing and what comes next. */

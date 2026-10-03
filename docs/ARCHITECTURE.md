@@ -194,11 +194,22 @@ time, and tap tempo sets the offset.
                                       └──────┴────────┴── history ◄────┘
 ```
 
-\* Each of the four image layers runs at one of the two points, chosen by its `placement`. In
+\* Each of the 20 image layers runs at one of the two points, chosen by its `placement`. In
 the scene, every effect acts on the picture. On top, it is composited after bloom and outside
-the feedback loop, so it keeps its own colours and only the CRT acts on it. The layers are the
-image stage compiled once per layer (`IMAGE_LAYERS`), with settings at `image.*`, `image2.*`
-and so on, a texture each, and the picture's aspect passed as `u_layerAspect`.
+the feedback loop, so it keeps its own colours and only the CRT acts on it. The layers
+(`IMAGE_LAYERS`) share the image stage's shader. `EffectPass.draw` takes the parameter group
+to bind, so one program draws `image.*`, `image2.*` and so on in turn, with the picture's
+aspect passed as `u_layerAspect`. A layer's texture exists only while it holds a picture.
+
+Most layers are small logos, so a layer is drawn only where it can reach. `imageReach()` in
+`gfx/imageReach.ts` works that out from the layer's settings: the picture's frame, moved as far
+as warp, ripple, bending and tearing can push it, plus the distance at which its glow and
+shadow have faded below one step of 8-bit colour. The shader and that function share their
+constants, and a comment in each points to the other. `Renderer.drawImages` then copies that
+rectangle of the current picture aside and draws the layer over it in place, with the scissor
+test limiting it to the rectangle. A layer reaching nearly the whole screen is drawn as an
+ordinary pass into the other ping-pong target instead, which is cheaper than the copy. Raw
+frames drawn this way match whole-screen passes to within one step out of 255.
 
 - Everything up to the image on top runs at scene resolution in linear HDR.
 - CRT and output run at output resolution, so scanlines and the phosphor mask are pixel exact
@@ -257,9 +268,12 @@ effective = clamp(value + depth * source * (max - min), min, max)
 Groups flagged `preset: false` (tempo, audio input, display) describe the music or the
 machine. Presets and Randomize leave them alone, and they cannot be modulated.
 
-The image group is flagged `optional`: a preset changes it only if it stores image settings.
-The built-in looks store none, so a logo stays where it was put while looks change. Saved
-presets do store them, because a look can be built around the picture.
+The image groups are flagged `optional`: a preset changes one only if it stores settings for
+it. The built-in looks store none, so a logo stays where it was put while looks change. Saved
+presets do store them, because a look can be built around the picture. An optional group still
+at its defaults is stored as its first value alone, which is enough for `load()` to know the
+preset covers it, so twenty image layers do not bloat every preset. `swapGroups` and
+`copyGroup` move and duplicate a layer's settings, for moving layers in the drawing order.
 
 `upgradePreset` in `presets.ts` brings data from older versions up to date before it is
 applied. Presets from before the image could be laid on top keep it in the scene, without the
@@ -407,7 +421,8 @@ Its shader reads the previous stage from `u_input`.
 | File | Covers |
 | --- | --- |
 | `tests/analysis.test.ts` | FFT calibration, band mapping, onsets, beat clock, repeatability of the analysis |
-| `tests/params.test.ts` | Validation, modulation, presets, optional groups, upgrading old presets, palettes |
+| `tests/params.test.ts` | Validation, modulation, presets, optional groups, upgrading old presets, image layers, palettes |
+| `tests/imageReach.test.ts` | The part of the screen an image layer can change, for every fit, effect and position |
 | `tests/cycle.test.ts` | Cycle schedule, shuffled order without repeats, the cycle playing through and after a jump |
 | `tests/export.test.ts` | Frame count and timing, identical inputs on every run, beat grid, cancelling |
 | `tests/frameStats.test.ts` | Frame rate and late-frame measurement |

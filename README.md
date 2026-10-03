@@ -166,15 +166,36 @@ fit, as it does for 1080 x 1350.
 
 ### Image
 
-Up to four pictures can be on screen at once, on image layers 1 to 4, each with its own
-settings. The tabs at the top of the Image section choose the layer the controls below act on,
-and a dot marks a layer that holds a picture. **Load image**, **Test card** and **Remove** act
-on the chosen layer. Pictures dropped onto the screen fill the empty layers in turn, several at
-once if you like. Layer 1 starts in the middle and layers 2 to 4 small in the corners, so a logo
-does not cover the artwork. Higher layers are drawn over lower ones.
+Up to 20 pictures can be on screen at once, on image layers 1 to 20, each with its own
+settings. The grid at the top of the Image section shows every layer in drawing order: higher
+numbers are drawn over lower ones. Click a layer to show its settings below the grid. A
+hidden layer is dimmed, an empty one dashed.
 
-**Test card** generates a broadcast test pattern to try things with. PNG transparency is kept,
-so a logo sits cleanly on the visuals.
+Getting pictures in:
+
+- **Add pictures** opens a file picker that takes several pictures at once. They go into the
+  empty layers in turn, and so do pictures dropped onto the screen.
+- Drop a picture onto a layer in the grid to put it into that layer.
+- **Load image** or **Replace** loads a picture into the selected layer and keeps its settings.
+- **Test card** generates a broadcast test pattern to try things with.
+
+Layer 1 starts in the middle, layers 2 to 5 small in the corners and the rest smaller still,
+spread over the screen, so a new picture does not land on the ones before it. PNG
+transparency is kept, so a logo sits cleanly on the visuals.
+
+Arranging the layers:
+
+| Control | What it does |
+| --- | --- |
+| **Back** and **Forward** | Move the selected layer one place down or up the drawing order |
+| Drag a layer in the grid | Moves it to where it is dropped. The layers in between shift along |
+| **Duplicate** | Puts a copy of the layer right above it: the same picture with the same settings |
+| **Visible** | Hides the layer without touching its settings |
+| **Remove** | Empties the layer. Its settings stay for the next picture |
+| **Clear all** | Empties every layer. Click it twice, so one slip does not lose them all |
+
+A layer moves with its settings, so its picture keeps its place, size and effects when it
+changes position in the order.
 
 **Placement** decides where the picture enters the chain:
 
@@ -194,9 +215,15 @@ What makes the picture part of the show rather than a sticker on it:
 **Position X** and **Position Y** move it, for example into a corner as a watermark. For a logo
 on a black background choose the blend **Screen**, for one on white **Multiply**.
 
-A preset you save stores the settings of every image layer with the look. The built-in looks
-store none, so switching between them leaves the pictures where you put them. The pictures
+A preset you save stores the settings of every image layer with the look, including which
+layers are visible, so a cycle of your own looks can show different pictures in each. A layer
+still at its starting settings takes a single entry in the preset. The built-in looks store no
+image settings, so switching between them leaves the pictures where you put them. The pictures
 themselves are not stored, only their settings.
+
+Pictures larger than 4096 pixels on either side are scaled down when they load. The app keeps
+no copy of them beyond the one on the graphics card. If the graphics driver resets, it reads
+the files again.
 
 A picture can also be mapped onto the tunnel walls: choose the pattern "Image walls" in the
 Tunnel generator. The walls show the lowest layer that holds a picture.
@@ -299,6 +326,21 @@ Measured on an NVIDIA RTX 3080 with every stage active and two pattern layers:
 
 While the cycle fades between two looks, both are drawn, which doubles the GPU time for the
 length of the transition.
+
+Each image layer is drawn only over the part of the screen it can reach: the picture, plus
+however far its glow, shadow and movement carry it. A small logo costs far less than a picture
+that fills the screen. With the same look at 1920 x 1080:
+
+| Image layers | GPU time per frame |
+| --- | --- |
+| None | 0.8 ms |
+| 4 small logos | 1.2 ms |
+| 10 small logos | 1.7 ms |
+| 20 small logos | 2.7 ms |
+| 20 photos filling the screen, stacked | 2.9 ms |
+| 20 large transparent logos, stacked | 3.9 ms |
+
+All of these fit within one frame at 165 Hz. Hidden and empty layers cost nothing.
 
 On slower graphics hardware, lower **Render scale** in the Output section. The scene is then
 rendered smaller and upscaled, while scanlines and the phosphor mask stay pixel sharp.

@@ -65,6 +65,7 @@ export const STAGES = {
           { value: 'scene', label: 'In the scene' },
         ],
       },
+      { key: 'visible', label: 'Visible', type: 'bool', default: true, hint: 'Hides the layer without changing its settings' },
       {
         key: 'blend',
         label: 'Blend',
@@ -264,45 +265,74 @@ export const STAGES = {
 /** Extra shader sources used by the bloom stage. */
 export const BLOOM_SHADERS = { down: bloomDown, up: bloomUp };
 
+/** How many pictures can be shown at once. */
+export const IMAGE_LAYER_COUNT = 20;
+
+/** The point of the Halton sequence in base `base`: well spread however many are taken. */
+function halton(index: number, base: number): number {
+  let result = 0;
+  let fraction = 1;
+  for (let i = index; i > 0; i = Math.floor(i / base)) {
+    fraction /= base;
+    result += fraction * (i % base);
+  }
+  return result;
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
 /**
- * Where each image layer starts, so a second picture does not land on the first: the first in
- * the middle, the others small in the corners.
+ * Where an image layer starts, so a new picture does not land on the ones before it: the first
+ * in the middle, the next four small in the corners, the rest smaller still, spread over the
+ * screen so that any number of them is evenly spaced.
  */
-const LAYER_PLACES: Array<Record<string, number>> = [
-  {},
-  { x: 0.62, y: -0.68, scale: 0.3 },
-  { x: -0.62, y: -0.68, scale: 0.3 },
-  { x: 0.62, y: 0.68, scale: 0.3 },
-];
+function layerPlace(layer: number): Record<string, number> {
+  const corners = [
+    { x: 0.62, y: -0.68 },
+    { x: -0.62, y: -0.68 },
+    { x: 0.62, y: 0.68 },
+    { x: -0.62, y: 0.68 },
+  ];
+  if (layer === 0) return {};
+  if (layer <= corners.length) return { ...corners[layer - 1]!, scale: 0.3 };
+  const k = layer - corners.length;
+  return { x: round2((halton(k, 2) * 2 - 1) * 0.8), y: round2((halton(k, 3) * 2 - 1) * 0.8), scale: 0.2 };
+}
 
 /**
  * The image layers: the image stage once per picture, each with its own settings at
- * `image.*`, `image2.*` and so on. The first is `STAGES.image` itself.
+ * `image.*`, `image2.*` and so on up to `image20.*`. The first is `STAGES.image` itself. They
+ * all draw with the image stage's shader, in order, so later layers draw on top.
  */
-export const IMAGE_LAYERS: EffectDef[] = LAYER_PLACES.map((place, i) =>
-  i === 0
-    ? STAGES.image
-    : {
-        ...STAGES.image,
-        id: `image${i + 1}`,
-        label: `Image ${i + 1}`,
-        params: STAGES.image.params.map((def) =>
-          def.type === 'float' && def.key in place ? { ...def, default: place[def.key]! } : def,
-        ),
-      },
-);
+export const IMAGE_LAYERS: EffectDef[] = Array.from({ length: IMAGE_LAYER_COUNT }, (_, i) => {
+  if (i === 0) return STAGES.image;
+  const place = layerPlace(i);
+  return {
+    ...STAGES.image,
+    id: `image${i + 1}`,
+    label: `Image ${i + 1}`,
+    params: STAGES.image.params.map((def) =>
+      def.type === 'float' && def.key in place ? { ...def, default: place[def.key]! } : def,
+    ),
+  };
+});
 
 if (import.meta.hot) {
   import.meta.hot.accept((next) => {
     const stages = next?.STAGES as Record<string, EffectDef> | undefined;
     const layers = next?.IMAGE_LAYERS as EffectDef[] | undefined;
     const bloom = next?.BLOOM_SHADERS as typeof BLOOM_SHADERS | undefined;
-    if (!stages || !layers || !bloom || !sameParams(Object.values(stages), Object.values(STAGES))) {
+    if (
+      !stages ||
+      !layers ||
+      !bloom ||
+      !sameParams([...Object.values(stages), ...layers], [...Object.values(STAGES), ...IMAGE_LAYERS])
+    ) {
       import.meta.hot!.invalidate();
       return;
     }
     publishShaders([
-      ...toHotShaders([...Object.values(stages), ...layers.slice(1)]),
+      ...toHotShaders(Object.values(stages)),
       { id: 'bloom.down', fragment: bloom.down },
       { id: 'bloom.up', fragment: bloom.up },
     ]);

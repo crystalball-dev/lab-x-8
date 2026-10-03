@@ -166,11 +166,58 @@ export class ParamStore {
     this.emit('*');
   }
 
+  /**
+   * Copies the values and modulation routes of one group into another with the same keys, such
+   * as one image layer into another.
+   */
+  copyGroup(from: string, to: string): void {
+    for (const [source, target] of this.pairs(from, to)) {
+      target.value = coerce(target.def, source.value);
+      target.mod = source.mod ? { ...source.mod } : null;
+      this.refresh(target);
+    }
+    this.rebuildModulated();
+    this.emit('*');
+  }
+
+  /** Exchanges the values and modulation routes of two groups with the same keys. */
+  swapGroups(a: string, b: string): void {
+    for (const [first, second] of this.pairs(a, b)) {
+      const { value, mod } = first;
+      first.value = coerce(first.def, second.value);
+      first.mod = second.mod;
+      second.value = coerce(second.def, value);
+      second.mod = mod;
+      this.refresh(first);
+      this.refresh(second);
+    }
+    this.rebuildModulated();
+    this.emit('*');
+  }
+
+  /** The entries of two groups that share a key, in pairs. */
+  private pairs(a: string, b: string): Array<[Entry, Entry]> {
+    const pairs: Array<[Entry, Entry]> = [];
+    for (const entry of this.entries.values()) {
+      if (entry.group.id !== a) continue;
+      const other = this.entries.get(`${b}.${entry.def.key}`);
+      if (other) pairs.push([entry, other]);
+    }
+    return pairs;
+  }
+
   snapshot(options: SnapshotOptions = {}): PresetData {
     const values: Record<string, ParamValue> = {};
     const mods: Record<string, ModRoute> = {};
+    const untouched = this.untouchedOptionalGroups();
     for (const entry of this.entries.values()) {
       if (entry.group.preset === false && !options.includeSystem) continue;
+      if (untouched.has(entry.group)) {
+        // An optional group still at its defaults, such as an image layer nobody has set up,
+        // keeps only its first value. That is enough for load() to return it to its defaults.
+        if (entry.def === entry.group.params[0]) values[entry.path] = entry.value;
+        continue;
+      }
       values[entry.path] = entry.value;
       // An explicit `none` route records that a default route was removed.
       if (entry.mod) mods[entry.path] = { ...entry.mod };
@@ -238,6 +285,15 @@ export class ParamStore {
     this.emit('*');
   }
 
+  /** Optional groups whose every value and modulation route is still the default. */
+  private untouchedOptionalGroups(): Set<ParamGroup> {
+    const untouched = new Set(this.groups.filter((group) => group.optional));
+    for (const entry of this.entries.values()) {
+      if (untouched.has(entry.group) && !isDefault(entry)) untouched.delete(entry.group);
+    }
+    return untouched;
+  }
+
   subscribe(listener: ParamListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -280,6 +336,14 @@ export class ParamStore {
         break;
     }
   }
+}
+
+function isDefault(entry: Entry): boolean {
+  const { def, mod } = entry;
+  if (entry.value !== def.default) return false;
+  const route = def.type === 'float' ? def.mod : undefined;
+  if (!route) return mod === null;
+  return mod !== null && mod.source === route.source && mod.amount === route.amount;
 }
 
 function coerce(def: ParamDef, value: ParamValue): ParamValue {

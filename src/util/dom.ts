@@ -57,12 +57,18 @@ export function syncRangeFill(input: HTMLInputElement): void {
 
 /** Opens the system file picker and resolves with the chosen file, or null when cancelled. */
 export function pickFile(accept: string): Promise<File | null> {
+  return pickFiles(accept, false).then((files) => files[0] ?? null);
+}
+
+/** Opens the file picker for one file, or for several when `multiple` is true. */
+export function pickFiles(accept: string, multiple = true): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
-    input.addEventListener('change', () => resolve(input.files?.[0] ?? null), { once: true });
-    input.addEventListener('cancel', () => resolve(null), { once: true });
+    input.multiple = multiple;
+    input.addEventListener('change', () => resolve([...(input.files ?? [])]), { once: true });
+    input.addEventListener('cancel', () => resolve([]), { once: true });
     input.click();
   });
 }
