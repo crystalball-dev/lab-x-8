@@ -183,11 +183,14 @@ export class ParamStore {
 
   /**
    * Applies a preset. Parameters the preset does not mention return to their defaults, so a
-   * preset always produces the same look regardless of what was on screen before.
+   * preset always produces the same look regardless of what was on screen before. Optional
+   * groups the preset stores nothing for are the exception: they stay as they are.
    */
   load(preset: PresetData, options: SnapshotOptions = {}): void {
+    const stored = new Set(Object.keys(preset.values).map((path) => path.slice(0, path.lastIndexOf('.'))));
     for (const entry of this.entries.values()) {
       if (entry.group.preset === false && !options.includeSystem) continue;
+      if (entry.group.optional && !stored.has(entry.group.id)) continue;
       const def = entry.def;
       const value = preset.values[entry.path];
       entry.value = value === undefined ? def.default : coerce(def, value);

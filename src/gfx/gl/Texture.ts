@@ -54,15 +54,20 @@ export class Texture {
     if (options.mipmaps && data) gl.generateMipmap(gl.TEXTURE_2D);
   }
 
-  /** Uploads an image, canvas, video frame or bitmap. */
-  upload(source: TexImageSource, width: number, height: number, flipY = true): void {
+  /**
+   * Uploads an image, canvas, video frame or bitmap. Bitmaps ignore both flags: they are
+   * flipped and premultiplied, or not, when they are decoded.
+   */
+  upload(source: TexImageSource, width: number, height: number, flipY = true, premultiply = false): void {
     const { gl, options } = this;
     this.width = width;
     this.height = height;
     gl.bindTexture(gl.TEXTURE_2D, this.handle);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flipY);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, premultiply);
     gl.texImage2D(gl.TEXTURE_2D, 0, options.internalFormat, options.format, options.type, source);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     if (options.mipmaps) gl.generateMipmap(gl.TEXTURE_2D);
   }
 

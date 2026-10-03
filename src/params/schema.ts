@@ -48,6 +48,70 @@ export const TEMPO_GROUP: ParamGroup = {
   ],
 };
 
+/** How one look gives way to the next. The order matches the styles in transition.frag. */
+export const TRANSITION_STYLES = [
+  { value: 'fade', label: 'Crossfade' },
+  { value: 'screen', label: 'Screen' },
+  { value: 'light', label: 'Brightest first' },
+  { value: 'glitch', label: 'Glitch blocks' },
+];
+
+/**
+ * Changing looks automatically during a track. A way of playing the presets, not part of one,
+ * so presets leave it alone.
+ */
+export const CYCLE_GROUP: ParamGroup = {
+  id: 'cycle',
+  label: 'Cycle',
+  preset: false,
+  params: [
+    { key: 'on', label: 'Cycle looks', type: 'bool', default: false },
+    {
+      key: 'pool',
+      label: 'Looks',
+      type: 'select',
+      default: 'all',
+      options: [
+        { value: 'all', label: 'All presets' },
+        { value: 'builtin', label: 'Built-in looks' },
+        { value: 'user', label: 'Your presets' },
+        { value: 'random', label: 'Random looks' },
+      ],
+    },
+    {
+      key: 'order',
+      label: 'Order',
+      type: 'select',
+      default: 'sequential',
+      options: [
+        { value: 'sequential', label: 'In order' },
+        { value: 'random', label: 'Shuffled' },
+      ],
+    },
+    {
+      key: 'bars',
+      label: 'Every',
+      type: 'select',
+      default: '16',
+      options: [4, 8, 16, 32, 64].map((n) => ({ value: String(n), label: `${n} bars` })),
+    },
+    { key: 'fade', label: 'Transition', type: 'float', min: 0, max: 8, step: 0.25, default: 2, rand: false, hint: 'Length in bars, ending on the bar line. 0 cuts on the bar line.' },
+    { key: 'style', label: 'Style', type: 'select', default: 'fade', options: TRANSITION_STYLES },
+    { key: 'seed', label: 'Shuffle', type: 'int', min: 0, max: 9999, default: 1, rand: false, hint: 'The same number deals the same order, or rolls the same random looks, again' },
+  ],
+};
+
+/** Groups of the look that Random leaves alone: the picture and the output settings. */
+const RANDOMIZE_SKIP = new Set(['image', 'output']);
+
+/**
+ * Rolls a new look, as the Random button does. Settings without a random range, such as the
+ * exposure or the custom colours, stay as they are.
+ */
+export function randomizeLook(store: ParamStore, rng: () => number): void {
+  store.randomize(rng, (_path, group) => !RANDOMIZE_SKIP.has(group.id));
+}
+
 /** Global motion controls shared by every generator. */
 export const MOTION_GROUP: ParamGroup = {
   id: 'motion',
@@ -97,11 +161,13 @@ function effectGroup(def: EffectDef): ParamGroup {
 export function createParamStore(): ParamStore {
   const store = new ParamStore();
   store.register(TEMPO_GROUP);
+  store.register(CYCLE_GROUP);
   store.register(AUDIO_GROUP);
   store.register(effectGroup(STAGES.layers));
   for (const generator of GENERATORS) store.register(effectGroup(generator));
   store.register(MOTION_GROUP);
-  store.register(effectGroup(STAGES.image));
+  // Presets without image settings, such as the built-in looks, leave the picture where it was put.
+  store.register({ ...effectGroup(STAGES.image), optional: true });
   store.register(effectGroup(STAGES.feedback));
   store.register(effectGroup(STAGES.color));
   store.register(effectGroup(STAGES.glitch));

@@ -57,7 +57,7 @@ uniform sampler2D u_waveform;     // 1D, trigger-aligned waveform -1..1
 uniform sampler2D u_spectrogram;  // 2D ring buffer of past spectra
 uniform sampler2D u_noise;        // 256x256 tiling random RGBA
 uniform sampler2D u_palette;      // 1D colour gradient
-uniform sampler2D u_image;        // user image (valid when u_imageAspect > 0)
+uniform sampler2D u_image;        // user image (valid when u_imageAspect > 0). Read it with imageAt()
 
 in vec2 v_uv;
 out vec4 fragColor;
@@ -86,4 +86,17 @@ vec3 paletteAt(float t) {
 /** Aspect-corrected coordinates centred on the screen. y spans -0.5..0.5. */
 vec2 centered(vec2 uv) {
   return (uv - 0.5) * vec2(u_aspect, 1.0);
+}
+
+vec3 srgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+/**
+ * The user image at uv: linear colour and straight alpha. The texture holds premultiplied
+ * sRGB, because only premultiplied colour filters cleanly at the edges of transparent pictures.
+ */
+vec4 imageAt(vec2 uv) {
+  vec4 c = texture(u_image, uv);
+  return vec4(srgbToLinear(c.rgb / max(c.a, 1e-4)), c.a);
 }

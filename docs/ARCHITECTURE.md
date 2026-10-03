@@ -189,12 +189,16 @@ time, and tap tempo sets the offset.
 
 ```
  generator A ─┐
- generator B ─┴─ layers ─ image ─ feedback ─ glitch ─ colour ─ bloom ─ CRT ─ output
-                                     ▲      │        │                │
-                                     └──────┴────────┴── history ◄────┘
+ generator B ─┴─ layers ─ image* ─ feedback ─ glitch ─ colour ─ bloom ─ image* ─ CRT ─ output
+                                      ▲      │        │                │
+                                      └──────┴────────┴── history ◄────┘
 ```
 
-- Everything up to bloom runs at scene resolution in linear HDR.
+\* The image stage runs at one of the two points, chosen by `image.placement`. In the scene,
+every effect acts on the picture. On top, it is composited after bloom and outside the feedback
+loop, so it keeps its own colours and only the CRT acts on it.
+
+- Everything up to the image on top runs at scene resolution in linear HDR.
 - CRT and output run at output resolution, so scanlines and the phosphor mask are pixel exact
   even when the scene is rendered at a lower scale.
 - Colour grading sits after the glitch tap on purpose. Gain inside a feedback loop runs away
@@ -214,10 +218,14 @@ time, and tap tempo sets the offset.
 | Bands | `u_sub`, `u_bass`, `u_lowMid`, `u_mid`, `u_highMid`, `u_high`, and `...Fast` variants |
 | Level | `u_level` |
 | Frame | `u_resolution`, `u_outputSize`, `u_aspect` |
-| Functions | `spectrumAt(x)`, `waveformAt(x)`, `historyAt(x, age)`, `paletteAt(t)`, `centered(uv)` |
+| Functions | `spectrumAt(x)`, `waveformAt(x)`, `historyAt(x, age)`, `paletteAt(t)`, `centered(uv)`, `imageAt(uv)` |
 
 These values live in one uniform block that is filled once per frame. Shared code is pulled in
 with `#include <math>`, `<color>` or `<sdf>`.
+
+The user image is stored premultiplied and still sRGB encoded, because only premultiplied colour
+filters and mips cleanly at the edges of a transparent logo. Read it with `imageAt(uv)`, which
+returns linear colour and straight alpha.
 
 ### Parameters in shaders
 
@@ -247,6 +255,14 @@ effective = clamp(value + depth * source * (max - min), min, max)
 Groups flagged `preset: false` (tempo, audio input, display) describe the music or the
 machine. Presets and Randomize leave them alone, and they cannot be modulated.
 
+The image group is flagged `optional`: a preset changes it only if it stores image settings.
+The built-in looks store none, so a logo stays where it was put while looks change. Saved
+presets do store them, because a look can be built around the picture.
+
+`upgradePreset` in `presets.ts` brings data from older versions up to date before it is
+applied. Presets from before the image could be laid on top keep it in the scene, without the
+newer glow, shadow and tearing, so they still look the way they did when they were saved.
+
 ## Export
 
 `src/export`, `tools/exportBridge.ts`
@@ -257,6 +273,7 @@ machine. Presets and Randomize leave them alone, and they cannot be modulated.
 for each frame i:
     analyse the track up to the middle of frame i
     advance the clock by exactly 1 / fps
+    let the look cycle change looks if a bar line is due
     render
     hand the canvas to the sink, wait until the sink is ready
 ```
@@ -298,6 +315,36 @@ compares the complete frame state and every parameter value of two runs. Most pa
 come out bit-identical. After a setting change, graphics drivers re-optimise shaders in the
 background, and isolated pixels can then differ by one step out of 255 for a few frames.
 Measured difference between two complete renders: 66 dB PSNR or better.
+
+## Look cycle
+
+`src/app/LookCycler.ts`, `src/gfx/TransitionPass.ts`
+
+The cycle plays presets one after another and changes on bar lines. Which look plays is a pure
+function of the position in the music: segment *k* of a track, the bars from *k* × *every* to
+(*k* + 1) × *every*, always shows the same look of the pool, in order or in a shuffle dealt from
+a seed. Random looks are rolled by `randomizeLook`, the function behind the Random button,
+with a generator seeded from the shuffle number and *k*. Random overwrites every setting it
+varies, so a random look does not depend on the looks before it, and seeking to a segment
+rolls the same look as playing up to it. The transition into the next segment takes its last bars, so a new look has fully
+arrived on the bar line.
+
+During playback a transition starts when the position enters it, from whatever is on screen.
+After a jump (a seek, the loop point of the demo, the start of an export) the cycle picks up
+wherever the position is, with both looks of a transition taken from their presets. An export
+therefore changes looks at exactly the frames the preview does.
+
+A transition draws two complete looks. The look fading out keeps its own copy of the
+parameters, which the audio goes on modulating, its own feedback history and its own palette.
+Both looks run the whole pipeline into an 8-bit target, and `TransitionPass` blends the two
+finished pictures onto the canvas: crossfade, screen, brightest first, or glitch blocks. At the
+start of a transition the outgoing look gets a copy of the feedback history, so both continue
+from the same picture. The GPU time doubles while a transition runs, about 2 ms at 1080p.
+
+Loading a preset changes nearly every parameter at once. The control panel therefore updates
+one section per frame after a bulk change, rebuilds a section only when its set of controls
+changes, and leaves rows alone whose value stayed the same. A change of look costs the frame
+about 0.1 ms of script.
 
 ## Adding a generator
 
@@ -358,7 +405,8 @@ Its shader reads the previous stage from `u_input`.
 | File | Covers |
 | --- | --- |
 | `tests/analysis.test.ts` | FFT calibration, band mapping, onsets, beat clock, repeatability of the analysis |
-| `tests/params.test.ts` | Validation, modulation, presets, palettes |
+| `tests/params.test.ts` | Validation, modulation, presets, optional groups, upgrading old presets, palettes |
+| `tests/cycle.test.ts` | Cycle schedule, shuffled order without repeats, the cycle playing through and after a jump |
 | `tests/export.test.ts` | Frame count and timing, identical inputs on every run, beat grid, cancelling |
 | `tests/frameStats.test.ts` | Frame rate and late-frame measurement |
 | `tests/bridge.test.ts` | Token and origin checks, approved paths, out-of-order writes, cancelling, a real FFmpeg encode |
@@ -384,5 +432,5 @@ end to end. The approval logic behind it is covered by `tests/bridge.test.ts`.
 | Spout, NDI | Native module in the shell that takes frames from the canvas |
 | macOS and Linux builds | The shell is portable. Needs a build on each system and another way to capture system audio |
 | Video or webcam as image layer | The image texture already accepts any `TexImageSource` |
-| Beat-synced preset changes | Step presets on `beatCount` |
+| Hand-picked cycle | A per-preset switch for taking part in the cycle, stored with the user presets |
 | Reorderable stage chain | Turn the fixed order in `Renderer.render` into a list stored in the preset |

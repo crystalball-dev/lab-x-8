@@ -76,7 +76,8 @@ void main() {
   } else {
     // Image-mapped walls, falling back to rings without an image.
     if (u_imageAspect > 0.0) {
-      vec3 img = texture(u_image, vec2(fract(ang * 2.0), fract(z * 0.35))).rgb;
+      vec4 picture = imageAt(vec2(fract(ang * 2.0), fract(z * 0.35)));
+      vec3 img = picture.rgb * picture.a;
       float fogI = smoothstep(0.02, 0.35, rr);
       fragColor = vec4(img * (0.7 + 1.5 * s) * fogI, 1.0);
       return;

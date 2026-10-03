@@ -167,6 +167,36 @@ const BUILT_IN: Array<{ name: string; values: PresetData['values']; mods?: Prese
   },
 ];
 
+/**
+ * Brings preset data from older versions up to date, so a saved look still looks the way it
+ * did when it was saved.
+ *
+ * Before the image could be laid on top, it was always mixed into the scene, had no glow,
+ * shadow or tearing, was not lit by the kick, and its "Base layer" blend was the same as Add.
+ */
+export function upgradePreset(data: PresetData): PresetData {
+  const values = data.values;
+  const storesImage = Object.keys(values).some((path) => path.startsWith('image.'));
+  if (!storesImage || 'image.placement' in values) return data;
+  const upgraded: PresetData['values'] = {
+    ...values,
+    'image.placement': 'scene',
+    'image.glow': 0,
+    'image.shadow': 0,
+    'image.glitch': 0,
+  };
+  if (values['image.blend'] === 'under') upgraded['image.blend'] = 'add';
+  return {
+    ...data,
+    values: upgraded,
+    mods: {
+      ...data.mods,
+      'image.brightness': data.mods?.['image.brightness'] ?? { source: 'none', amount: 0 },
+      'image.glow': { source: 'none', amount: 0 },
+    },
+  };
+}
+
 function slug(name: string): string {
   return name
     .toLowerCase()
@@ -177,6 +207,7 @@ function slug(name: string): string {
 /** Built-in and user presets. User presets are remembered between sessions. */
 export class PresetManager {
   private user: Preset[] = [];
+  private revision = 0;
   private readonly builtIn: Preset[] = BUILT_IN.map((p) => ({
     id: `builtin:${slug(p.name)}`,
     name: p.name,
@@ -200,6 +231,11 @@ export class PresetManager {
     return [...this.builtIn, ...this.user];
   }
 
+  /** Changes whenever a preset is saved or deleted. */
+  get version(): number {
+    return this.revision;
+  }
+
   find(id: string): Preset | undefined {
     return this.all.find((p) => p.id === id);
   }
@@ -207,7 +243,7 @@ export class PresetManager {
   apply(id: string): boolean {
     const preset = this.find(id);
     if (!preset) return false;
-    this.params.load(preset.data);
+    this.params.load(upgradePreset(preset.data));
     return true;
   }
 
@@ -236,11 +272,12 @@ export class PresetManager {
     if (!data || typeof data !== 'object' || typeof data.values !== 'object') {
       throw new Error(`This file is not a ${BRAND.name} preset.`);
     }
-    this.params.load(data);
+    this.params.load(upgradePreset(data));
     return data;
   }
 
   private persist(): void {
+    this.revision++;
     storage.set(STORAGE_KEY, JSON.stringify(this.user));
   }
 }

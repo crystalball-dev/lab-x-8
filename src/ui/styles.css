@@ -580,6 +580,7 @@ details.section[open] {
 
 /* The panel runs through a spectrum, top to bottom. */
 details.section[data-section='tempo'] { --sec: #c6ff00; }
+details.section[data-section='cycle'] { --sec: #5cff86; }
 details.section[data-section='audio'] { --sec: #19e6c1; }
 details.section[data-section='layers'] { --sec: #22d3ff; }
 details.section[data-section='image'] { --sec: #5b8cff; }
@@ -698,6 +699,16 @@ details.section > summary .reset:hover {
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.4;
+}
+
+/* What the look cycle is playing and what comes next. */
+.cycle-status {
+  padding: 7px 9px;
+  border-left: 2px solid var(--sec);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--panel-2);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 /* ---------- parameter rows ---------- */

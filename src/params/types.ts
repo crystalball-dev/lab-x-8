@@ -107,6 +107,11 @@ export interface ParamGroup {
    * (input sensitivity, output resolution) and is left alone by presets.
    */
   preset?: boolean;
+  /**
+   * When true, a preset changes the group only if it stores values for it. Presets without any,
+   * such as the built-in looks, leave the group as it is.
+   */
+  optional?: boolean;
 }
 
 export interface PresetData {

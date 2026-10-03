@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ParamStore, hexToLinear } from '../src/params/ParamStore';
 import { PALETTES, renderPalette } from '../src/params/palettes';
-import { MOD_SOURCES, MOD_SOURCE_INDEX, type ParamGroup } from '../src/params/types';
+import { upgradePreset } from '../src/params/presets';
+import { MOD_SOURCES, MOD_SOURCE_INDEX, type ParamGroup, type PresetData } from '../src/params/types';
 
 const LOOK: ParamGroup = {
   id: 'look',
@@ -33,10 +34,22 @@ const MACHINE: ParamGroup = {
   params: [{ key: 'bpm', label: 'BPM', type: 'float', min: 60, max: 220, default: 174 }],
 };
 
+/** Like the image: only presets that store values for it change it. */
+const PICTURE: ParamGroup = {
+  id: 'picture',
+  label: 'Picture',
+  optional: true,
+  params: [
+    { key: 'size', label: 'Size', type: 'float', min: 0, max: 2, default: 1, mod: { source: 'kick', amount: 0.25 } },
+    { key: 'spot', label: 'Spot', type: 'float', min: -1, max: 1, default: 0 },
+  ],
+};
+
 function createStore(): ParamStore {
   const store = new ParamStore();
   store.register(LOOK);
   store.register(MACHINE);
+  store.register(PICTURE);
   return store;
 }
 
@@ -180,6 +193,27 @@ describe('ParamStore presets', () => {
     expect(store.get('machine.bpm')).toBe(90);
   });
 
+  it('leaves optional groups alone when a preset stores nothing for them', () => {
+    const store = createStore();
+    store.set('picture.size', 0.3);
+    store.set('picture.spot', 0.5);
+    store.setMod('picture.size', { source: 'snare', amount: 0.5 });
+    store.load({ version: 1, values: { 'look.amount': 1 } });
+    expect(store.get('picture.size')).toBe(0.3);
+    expect(store.get('picture.spot')).toBe(0.5);
+    expect(store.getMod('picture.size')).toEqual({ source: 'snare', amount: 0.5 });
+  });
+
+  it('applies optional groups when the preset stores them, defaulting what it leaves out', () => {
+    const store = createStore();
+    store.set('picture.spot', 0.5);
+    store.load({ version: 1, values: { 'picture.size': 2 } });
+    expect(store.get('picture.size')).toBe(2);
+    expect(store.get('picture.spot')).toBe(0);
+    expect(store.getMod('picture.size')).toEqual({ source: 'kick', amount: 0.25 });
+    expect(store.snapshot().values['picture.size']).toBe(2);
+  });
+
   it('ignores unknown entries and repairs invalid ones', () => {
     const store = createStore();
     store.load({
@@ -204,6 +238,44 @@ describe('ParamStore presets', () => {
       expect(Number.isInteger(store.get('look.count'))).toBe(true);
       expect(store.get('machine.bpm')).toBe(174);
     }
+  });
+});
+
+describe('Preset upgrade', () => {
+  const legacy: PresetData = {
+    version: 1,
+    values: { 'layers.a': 'plasma', 'image.blend': 'under', 'image.kaleido': 12 },
+    mods: { 'image.scale': { source: 'kick', amount: 0.02 } },
+  };
+
+  it('keeps the image of older presets in the scene, without the newer effects', () => {
+    const upgraded = upgradePreset(legacy);
+    expect(upgraded.values).toMatchObject({
+      'layers.a': 'plasma',
+      'image.placement': 'scene',
+      'image.kaleido': 12,
+      'image.glow': 0,
+      'image.shadow': 0,
+      'image.glitch': 0,
+    });
+    expect(upgraded.mods).toMatchObject({
+      'image.scale': { source: 'kick', amount: 0.02 },
+      'image.brightness': { source: 'none', amount: 0 },
+      'image.glow': { source: 'none', amount: 0 },
+    });
+  });
+
+  it('turns the old Base layer blend into Add, which drew the same', () => {
+    expect(upgradePreset(legacy).values['image.blend']).toBe('add');
+    const mask = { ...legacy, values: { ...legacy.values, 'image.blend': 'mask' } };
+    expect(upgradePreset(mask).values['image.blend']).toBe('mask');
+  });
+
+  it('leaves current presets and presets without an image untouched', () => {
+    const current: PresetData = { version: 1, values: { 'image.placement': 'top', 'image.glow': 0.8 } };
+    expect(upgradePreset(current)).toBe(current);
+    const noImage: PresetData = { version: 1, values: { 'layers.a': 'tunnel' } };
+    expect(upgradePreset(noImage)).toBe(noImage);
   });
 });
 

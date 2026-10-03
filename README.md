@@ -16,7 +16,8 @@ synthesis and clean generative geometry: glowing patterns driven by the music, p
 video feedback, digital corruption and a worn analog monitor.
 
 It runs in real time at 1920 x 1080 (and above), takes live audio or audio files, can use your
-own image as a layer, and renders finished video files for VJ sets or standalone content.
+own image or logo on top of the visuals or inside them, and renders finished video files for VJ
+sets or standalone content.
 
 ![Six of the built-in looks](docs/looks.jpg)
 
@@ -139,7 +140,7 @@ After the patterns, the picture passes through these stages, in this order:
 
 | Stage | Purpose |
 | --- | --- |
-| Image | Your picture as a base layer, overlay or mask, bent by the audio |
+| Image | Your picture, when it is mixed into the scene. On top, it comes after Bloom instead |
 | Feedback | Video feedback: trails, echoes, analog persistence |
 | Glitch | Digital corruption that fires with the transients |
 | Colour | Palette, exposure, contrast, saturation, hue, posterize |
@@ -153,8 +154,32 @@ panel has its own colour, so you can tell at a glance which stage a slider belon
 ### Image
 
 **Load image** in the Image section, or drop a file onto the picture. **Test card** generates
-a broadcast test pattern to try things with. The image can also be mapped onto the tunnel
-walls: choose the pattern "Image walls" in the Tunnel generator.
+a broadcast test pattern to try things with. PNG transparency is kept, so a logo sits cleanly
+on the visuals.
+
+**Placement** decides where the picture enters the chain:
+
+| Placement | Result |
+| --- | --- |
+| On top | Laid over the finished visuals, sharp and in its own colours. Only the CRT screen acts on it, so it still sits on the same monitor as everything else |
+| In the scene | Mixed in before the effects. Trails, glitches, grading and bloom act on it, and it melts into the visuals |
+
+What makes the picture part of the show rather than a sticker on it:
+
+- It pulses and flashes with the kick: Scale and Brightness are driven by the kick by default.
+- **Neon glow** runs a rim of light around it in the colours of the palette.
+- **Shadow** darkens the visuals around it, so even thin lettering reads over a busy picture.
+- **Glitch** tears bands of it sideways on drum hits. **RGB split**, **Warp**, **Ripple** and
+  **Bend by visuals** shake and bend it with the music.
+
+**Position X** and **Position Y** move it, for example into a corner as a watermark. For a logo
+on a black background choose the blend **Screen**, for one on white **Multiply**.
+
+A preset you save stores the image settings with the look. The built-in looks store none, so
+switching between them leaves the picture where you put it.
+
+The image can also be mapped onto the tunnel walls: choose the pattern "Image walls" in the
+Tunnel generator.
 
 ### Letting the audio drive a parameter
 
@@ -171,7 +196,33 @@ The sensitivity of each frequency band is set in **Audio input**.
 
 Seven built-in looks, plus your own. **Random** (or `R`) rolls a new look. **Export preset**
 and **Import preset** move looks between machines as JSON files. Presets store the look only.
-Tempo, input sensitivity and display settings are left alone.
+Tempo, input sensitivity and display settings are left alone. A preset without image settings,
+such as a built-in look, leaves the image alone too.
+
+### Cycling through looks
+
+**Cycle** changes looks by itself during a track, on bar lines, so a long track keeps moving.
+
+| Setting | Effect |
+| --- | --- |
+| Looks | All presets, the built-in looks, only your own presets, or random looks |
+| Order | In order, or shuffled. Shuffled plays every look once before any comes back, and never the same look twice in a row |
+| Every | 4, 8, 16, 32 or 64 bars |
+| Transition | Length of the change in bars, ending on the bar line. 0 cuts on the beat |
+| Style | **Crossfade**. **Screen**: the light of the two looks adds up. **Brightest first**: the new look breaks through where it shines most. **Glitch blocks**: the picture flips block by block |
+
+During a transition both looks are drawn in full, each with its own trails, and the two
+finished pictures are blended. Nothing jumps, and the look fading out keeps moving with the
+music until it is gone.
+
+**Random looks** rolls a new look at every change, the way the **Random** button does. What
+Random leaves alone stays as you set it: the image and output settings, and settings such as
+exposure, hue, posterize and the custom colours. **Roll new looks** gives a different series.
+If a random look is worth keeping, press **Save** while it is on screen.
+
+The cycle counts bars from the start of the track, so an export changes looks at exactly the
+same moments as the preview, random looks included. Set the BPM first. **Reshuffle** deals a
+new shuffled order, and `C` turns the cycle on and off.
 
 ### Keys
 
@@ -182,6 +233,7 @@ Tempo, input sensitivity and display settings are left alone.
 | F | Fullscreen |
 | S | Show or hide the statistics |
 | T | Tap tempo |
+| C | Cycle looks on or off |
 | R | Random look |
 | E | Export video |
 | Left, Right | Previous or next preset |
@@ -224,6 +276,9 @@ Measured on an NVIDIA RTX 3080 with every stage active and two pattern layers:
 | 1920 x 1080 | 0.6 to 1.1 ms | 4 to 7 % |
 | 2560 x 1440 | 1.0 to 1.3 ms | 6 to 8 % |
 | 3840 x 2160 | 2.0 to 2.7 ms | 12 to 16 % |
+
+While the cycle fades between two looks, both are drawn, which doubles the GPU time for the
+length of the transition.
 
 On slower graphics hardware, lower **Render scale** in the Output section. The scene is then
 rendered smaller and upscaled, while scanlines and the phosphor mask stay pixel sharp.

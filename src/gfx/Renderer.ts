@@ -12,6 +12,7 @@ import { GlobalsBuffer } from './GlobalsBuffer';
 import { createGLContext, type GLCaps } from './gl/context';
 import { PingPong, RenderTarget, type TargetFormat } from './gl/RenderTarget';
 import { Texture } from './gl/Texture';
+import { TransitionPass } from './TransitionPass';
 
 const NOISE_SIZE = 256;
 const PALETTE_WIDTH = 256;
@@ -23,22 +24,63 @@ export interface ImageSource {
   width: number;
   height: number;
   /**
-   * Whether the upload has to flip the rows. Bitmaps ignore the GL flip flag, so they are
-   * decoded already flipped and pass false.
+   * Whether the upload has to flip the rows. Bitmaps ignore the GL flip and premultiply flags,
+   * so they are decoded already flipped and premultiplied, and pass false.
    */
   flipY: boolean;
+}
+
+/** One look giving way to another, as the look cycle plays them. */
+export interface Transition {
+  /** Changes with every new transition, which tells the renderer that one has begun. */
+  id: number;
+  /** The look fading out. The renderer's own parameters hold the look fading in. */
+  from: ParamStore;
+  /** 0 when the transition starts, 1 when the new look has taken over. */
+  progress: number;
+  /** Index into TRANSITION_STYLES. */
+  style: number;
+}
+
+/** What a look carries from one frame to the next, apart from its parameters. */
+class LookState {
+  readonly history: RenderTarget;
+  readonly palette: Texture;
+  paletteDirty = true;
+
+  constructor(gl: WebGL2RenderingContext, format: TargetFormat) {
+    this.history = new RenderTarget(gl, format);
+    this.palette = new Texture(gl, {
+      internalFormat: gl.SRGB8_ALPHA8,
+      format: gl.RGBA,
+      type: gl.UNSIGNED_BYTE,
+      wrapS: gl.MIRRORED_REPEAT,
+    });
+    this.palette.allocate(PALETTE_WIDTH, 1, new Uint8Array(PALETTE_WIDTH * 4));
+  }
+
+  dispose(): void {
+    this.history.dispose();
+    this.palette.dispose();
+  }
 }
 
 /**
  * Runs the render pipeline:
  *
  *   generator A ─┐
- *   generator B ─┴─ layers ─ image ─ feedback ─ glitch ─ colour ─ bloom ─ CRT ─ output
- *                                       ▲      │        │                │
- *                                       └──────┴────────┴── history ◄────┘ (selectable tap)
+ *   generator B ─┴─ layers ─ image* ─ feedback ─ glitch ─ colour ─ bloom ─ image* ─ CRT ─ output
+ *                                        ▲      │        │                │
+ *                                        └──────┴────────┴── history ◄────┘ (selectable tap)
  *
- * Everything up to bloom runs at scene resolution in linear HDR. CRT and output run at the
- * full output resolution so scanlines and the phosphor mask stay pixel exact.
+ *   * The image runs at one of the two points: in the scene, where every effect acts on it,
+ *     or on top, where only the CRT screen does.
+ *
+ * Everything up to the image on top runs at scene resolution in linear HDR. CRT and output run
+ * at the full output resolution so scanlines and the phosphor mask stay pixel exact.
+ *
+ * During a transition the whole pipeline runs twice, once for each look with its own feedback
+ * history and palette, and the two finished pictures are blended onto the canvas.
  */
 export class Renderer {
   readonly gl: WebGL2RenderingContext;
@@ -49,22 +91,28 @@ export class Renderer {
   /** Every effect by id: generators (`gen.*`) and stages. */
   private readonly passes = new Map<string, EffectPass>();
   private readonly bloom: BloomStage;
+  private readonly transitionPass: TransitionPass;
 
   private readonly genA: RenderTarget;
   private readonly genB: RenderTarget;
   private readonly chain: PingPong;
-  private readonly history: RenderTarget;
   private readonly full: RenderTarget;
+  /** The look on screen, or fading in. */
+  private readonly current: LookState;
+  /** The look fading out during a transition. */
+  private readonly fading: LookState;
+  /** Finished pictures of the two looks of a transition, before they are blended. */
+  private readonly outgoing: RenderTarget;
+  private readonly incoming: RenderTarget;
 
   private readonly audioTextures: AudioTextures;
   private readonly globals: GlobalsBuffer;
   private readonly noise: Texture;
-  private readonly palette: Texture;
   private readonly imageTexture: Texture;
   private readonly vao: WebGLVertexArrayObject;
 
   private imageAspect = 0;
-  private paletteDirty = true;
+  private transitionId = 0;
   private outputWidth = 0;
   private outputHeight = 0;
   private sceneWidth = 0;
@@ -93,12 +141,16 @@ export class Renderer {
       this.passes.set(def.id, new EffectPass(gl, def));
     }
     this.bloom = new BloomStage(gl);
+    this.transitionPass = new TransitionPass(gl);
 
     this.genA = new RenderTarget(gl, format);
     this.genB = new RenderTarget(gl, format);
     this.chain = new PingPong(gl, format);
-    this.history = new RenderTarget(gl, format);
     this.full = new RenderTarget(gl, format);
+    this.current = new LookState(gl, format);
+    this.fading = new LookState(gl, format);
+    this.outgoing = new RenderTarget(gl, 'ldr');
+    this.incoming = new RenderTarget(gl, 'ldr');
 
     this.audioTextures = new AudioTextures(gl);
 
@@ -114,16 +166,10 @@ export class Renderer {
     for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.floor(rng() * 256);
     this.noise.allocate(NOISE_SIZE, NOISE_SIZE, noiseData);
 
-    this.palette = new Texture(gl, {
-      internalFormat: gl.SRGB8_ALPHA8,
-      format: gl.RGBA,
-      type: gl.UNSIGNED_BYTE,
-      wrapS: gl.MIRRORED_REPEAT,
-    });
-    this.palette.allocate(PALETTE_WIDTH, 1, new Uint8Array(PALETTE_WIDTH * 4));
-
+    // Premultiplied and still sRGB encoded, so transparent edges filter and mip cleanly.
+    // Shaders read it through imageAt(), which undoes both.
     this.imageTexture = new Texture(gl, {
-      internalFormat: gl.SRGB8_ALPHA8,
+      internalFormat: gl.RGBA8,
       format: gl.RGBA,
       type: gl.UNSIGNED_BYTE,
       wrapS: gl.MIRRORED_REPEAT,
@@ -135,7 +181,7 @@ export class Renderer {
     this.subscriptions.push(
       params.subscribe((path) => {
         if (path === '*' || path.startsWith('color.palette') || path.startsWith('color.custom')) {
-          this.paletteDirty = true;
+          this.current.paletteDirty = true;
         }
       }),
       onShadersChanged((shaders) => this.reloadShaders(shaders)),
@@ -181,9 +227,13 @@ export class Renderer {
     this.genA.resize(sw, sh);
     this.genB.resize(sw, sh);
     this.chain.resize(sw, sh);
-    this.history.resize(sw, sh);
-    this.history.clear();
+    for (const look of [this.current, this.fading]) {
+      look.history.resize(sw, sh);
+      look.history.clear();
+    }
     this.full.resize(w, h);
+    this.outgoing.resize(w, h);
+    this.incoming.resize(w, h);
     this.bloom.resize(sw, sh);
   }
 
@@ -194,24 +244,27 @@ export class Renderer {
       this.imageAspect = 0;
       return;
     }
-    this.imageTexture.upload(image.source, image.width, image.height, image.flipY);
+    this.imageTexture.upload(image.source, image.width, image.height, image.flipY, true);
     this.imageAspect = image.width / image.height;
   }
 
   /** Clears all temporal state: feedback history and the spectrogram. */
   reset(): void {
-    this.history.clear();
+    this.current.history.clear();
+    this.fading.history.clear();
     this.chain.clear();
     this.audioTextures.reset();
   }
 
-  render(frame: FrameState): void {
+  /**
+   * Draws a frame of the look in the renderer's parameters, or of a transition from another
+   * look into it.
+   */
+  render(frame: FrameState, transition: Transition | null = null): void {
     const gl = this.gl;
-    const p = this.params;
     if (this.outputWidth === 0 || gl.isContextLost()) return;
 
     this.audioTextures.update(frame.audio, frame.dt);
-    if (this.paletteDirty) this.updatePalette();
     this.globals.update(frame, {
       historyRow: this.audioTextures.historyRow,
       historyFraction: this.audioTextures.historyFraction,
@@ -225,8 +278,34 @@ export class Renderer {
     this.audioTextures.waveform.bind(1);
     this.audioTextures.spectrogram.bind(2);
     this.noise.bind(3);
-    this.palette.bind(4);
     this.imageTexture.bind(5);
+
+    if (!transition) {
+      this.drawLook(this.params, this.current, null);
+      return;
+    }
+    if (transition.id !== this.transitionId) {
+      // The look fading out carries on from the same picture as the one fading in.
+      this.transitionId = transition.id;
+      this.copy(this.current.history, this.fading.history);
+      this.fading.paletteDirty = true;
+    }
+    this.drawLook(transition.from, this.fading, this.outgoing);
+    this.drawLook(this.params, this.current, this.incoming);
+    this.transitionPass.draw(
+      this.outgoing.texture,
+      this.incoming.texture,
+      transition.progress,
+      transition.style,
+      this.outputWidth,
+      this.outputHeight,
+    );
+  }
+
+  /** Runs the whole pipeline for one look into `target`, or onto the canvas when it is null. */
+  private drawLook(p: ParamStore, look: LookState, target: RenderTarget | null): void {
+    if (look.paletteDirty) this.updatePalette(look, p);
+    look.palette.bind(4);
 
     const chain = this.chain;
     // Runs one stage of the chain and returns its result.
@@ -245,26 +324,26 @@ export class Renderer {
       current = stage('layers', { u_input: current, u_inputB: this.genB.texture });
     }
 
-    // --- image ---------------------------------------------------------------------------------
-    if (this.hasImage && p.num('image.opacity') > 0.001) {
-      current = stage('image', { u_input: current });
-    }
+    // --- image, in the scene --------------------------------------------------------------------
+    const showImage = this.hasImage && p.num('image.opacity') > 0.001;
+    const imageOnTop = p.str('image.placement') === 'top';
+    if (showImage && !imageOnTop) current = stage('image', { u_input: current });
 
     // --- feedback ------------------------------------------------------------------------------
     const feedbackOn = p.num('feedback.amount') > 0.001;
     const tap = p.str('feedback.tap');
     if (feedbackOn) {
-      current = stage('feedback', { u_input: current, u_feedback: this.history.texture });
-      if (tap === 'scene') this.storeHistory(chain.read);
+      current = stage('feedback', { u_input: current, u_feedback: look.history.texture });
+      if (tap === 'scene') this.copy(chain.read, look.history);
     }
 
     // --- corruption, then grading --------------------------------------------------------------
     // Grading comes after the glitch tap: gain inside a feedback loop would run away to white.
     if (p.num('glitch.amount') > 0.001) {
       current = stage('glitch', { u_input: current });
-      if (feedbackOn && tap === 'glitch') this.storeHistory(chain.read);
+      if (feedbackOn && tap === 'glitch') this.copy(chain.read, look.history);
     } else if (feedbackOn && tap === 'glitch') {
-      this.storeHistory(chain.read);
+      this.copy(chain.read, look.history);
     }
     current = stage('color', { u_input: current });
 
@@ -274,14 +353,19 @@ export class Renderer {
       chain.swap();
       current = chain.read.texture;
     }
-    if (feedbackOn && tap === 'final') this.storeHistory(chain.read);
+    if (feedbackOn && tap === 'final') this.copy(chain.read, look.history);
+
+    // --- image, on top ---------------------------------------------------------------------------
+    // After every effect that would smear or recolour it, and outside the feedback loop, but
+    // still on the screen it is shown on.
+    if (showImage && imageOnTop) current = stage('image', { u_input: current });
 
     // --- display -------------------------------------------------------------------------------
     if (p.num('crt.amount') > 0.001) {
       this.pass('crt').draw(this.full, { u_input: current }, p);
       current = this.full.texture;
     }
-    this.pass('output').draw(null, { u_input: current }, p, this.outputWidth, this.outputHeight);
+    this.pass('output').draw(target, { u_input: current }, p, this.outputWidth, this.outputHeight);
   }
 
   private pass(id: string): EffectPass {
@@ -312,17 +396,17 @@ export class Renderer {
     }
   }
 
-  private storeHistory(source: RenderTarget): void {
+  /** Copies a scene-sized target into another, such as a feedback history. */
+  private copy(source: RenderTarget, destination: RenderTarget): void {
     const gl = this.gl;
     const w = this.sceneWidth;
     const h = this.sceneHeight;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.history.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
     gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
   }
 
-  private updatePalette(): void {
-    const p = this.params;
+  private updatePalette(look: LookState, p: ParamStore): void {
     const id = p.str('color.palette');
     const stops =
       id === CUSTOM_PALETTE
@@ -333,23 +417,26 @@ export class Renderer {
             p.str('color.custom4'),
           ]
         : (findPalette(id)?.stops ?? ['#000000', '#ffffff']);
-    this.palette.update(0, 0, PALETTE_WIDTH, 1, renderPalette(stops, PALETTE_WIDTH));
-    this.paletteDirty = false;
+    look.palette.update(0, 0, PALETTE_WIDTH, 1, renderPalette(stops, PALETTE_WIDTH));
+    look.paletteDirty = false;
   }
 
   dispose(): void {
     for (const unsubscribe of this.subscriptions) unsubscribe();
     for (const pass of this.passes.values()) pass.dispose();
     this.bloom.dispose();
+    this.transitionPass.dispose();
     this.genA.dispose();
     this.genB.dispose();
     this.chain.dispose();
-    this.history.dispose();
     this.full.dispose();
+    this.current.dispose();
+    this.fading.dispose();
+    this.outgoing.dispose();
+    this.incoming.dispose();
     this.audioTextures.dispose();
     this.globals.dispose();
     this.noise.dispose();
-    this.palette.dispose();
     this.imageTexture.dispose();
     this.gl.deleteVertexArray(this.vao);
   }

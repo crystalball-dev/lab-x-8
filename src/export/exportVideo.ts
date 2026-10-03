@@ -1,4 +1,5 @@
 import { FrameClock } from '../app/FrameClock';
+import type { LookCycler } from '../app/LookCycler';
 import { readAnalyzerConfig } from '../audio/AudioEngine';
 import { Analyzer } from '../audio/analysis/Analyzer';
 import { createFeatures } from '../audio/analysis/features';
@@ -22,6 +23,8 @@ const YIELD_INTERVAL_MS = 50;
 
 export interface ExportJob {
   renderer: Renderer;
+  /** Changes looks during the track when the cycle is on. */
+  cycler?: LookCycler;
   params: ParamStore;
   track: AudioBuffer;
   settings: ExportSettings;
@@ -67,6 +70,8 @@ export async function exportVideo(job: ExportJob): Promise<ExportResult> {
 
   renderer.resize(settings.width, settings.height, 1);
   renderer.reset();
+  // The cycle picks its looks from the track position of the first frame, as a seek would.
+  job.cycler?.reset();
   analyseUntil(settings.start);
 
   await sink.start();
@@ -83,7 +88,8 @@ export async function exportVideo(job: ExportJob): Promise<ExportResult> {
       analyseUntil(trackTime);
       analyzer.read(features, trackTime - analysisStart, trackTime);
 
-      renderer.render(clock.advance(1 / fps, features));
+      const frame = clock.advance(1 / fps, features);
+      renderer.render(frame, job.cycler?.update(features, clock.modSources) ?? null);
       await sink.addFrame(i / fps, 1 / fps);
 
       if (settings.includeAudio) {

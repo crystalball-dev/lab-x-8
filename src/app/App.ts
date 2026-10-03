@@ -7,8 +7,8 @@ import { exportVideo, sliceBuffer } from '../export/exportVideo';
 import type { ExportResult, FrameSink } from '../export/types';
 import { GENERATORS } from '../effects/generators';
 import { MAX_IMAGE_SIZE, Renderer, type ImageSource } from '../gfx/Renderer';
-import { PresetManager } from '../params/presets';
-import { createParamStore, parseResolution } from '../params/schema';
+import { PresetManager, upgradePreset } from '../params/presets';
+import { createParamStore, parseResolution, randomizeLook } from '../params/schema';
 import type { PresetData } from '../params/types';
 import { publisherLink, wordmark } from '../ui/brand';
 import { ExportDialog, type ExportRequest } from '../ui/ExportDialog';
@@ -22,13 +22,12 @@ import { createRng } from '../util/math';
 import { storage } from '../util/storage';
 import { FrameClock } from './FrameClock';
 import { FrameStats } from './FrameStats';
+import { LookCycler } from './LookCycler';
 import { createTestCard } from './testCard';
 
 const STATE_KEY = 'lab-x-8.state.v1';
 const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
 const IMAGE_TYPES = 'image/*';
-/** Parameter groups that Randomize leaves alone. */
-const RANDOMIZE_SKIP = new Set(['image', 'output']);
 
 /**
  * Composition root. Owns the long-lived objects, wires them together and runs the frame loop.
@@ -41,6 +40,9 @@ export class App {
   renderer: Renderer;
 
   private readonly clock = new FrameClock(this.params);
+  private readonly cycler = new LookCycler(this.params, this.presets, (preset) => {
+    this.header.syncPresets(preset?.id ?? '');
+  });
   private readonly recorder = new LiveRecorder();
   private readonly hud = new Hud();
   private readonly canvas: HTMLCanvasElement;
@@ -53,6 +55,7 @@ export class App {
   private readonly rng = createRng((Date.now() ^ 0x9e3779b9) >>> 0);
 
   private image: ImageSource | null = null;
+  private appliedResolution = '';
   private exporting = false;
   private contextLost = false;
 
@@ -117,6 +120,7 @@ export class App {
       useTestCard: () => this.setImage({ source: createTestCard(), width: 1920, height: 1080, flipY: true }),
       removeImage: () => this.setImage(null),
       hasImage: () => this.image !== null,
+      cycleStatus: () => this.cycler.describe(),
     });
     this.side = h('aside', { class: 'panel' }, [this.header.element, this.panel.element]);
     root.append(this.stage, this.side);
@@ -135,7 +139,7 @@ export class App {
     const saveState = debounce(() => this.saveState(), 400);
     this.params.subscribe((path) => {
       if (path === '*' || path === 'system.resolution' || path === 'system.renderScale') {
-        if (!this.exporting) this.applyResolution();
+        if (!this.exporting) this.applyResolution(false);
       }
       if (path === '*' || path === 'system.hud') this.hud.visible = this.params.bool('system.hud');
       saveState();
@@ -162,7 +166,8 @@ export class App {
 
     const begin = performance.now();
     this.audio.update();
-    this.renderer.render(this.clock.advance(dt, this.audio.features));
+    const frame = this.clock.advance(dt, this.audio.features);
+    this.renderer.render(frame, this.cycler.update(this.audio.features, this.clock.modSources));
     const cost = performance.now() - begin;
 
     this.frameStats.frame(now, cost);
@@ -185,9 +190,14 @@ export class App {
     return renderer;
   }
 
-  private applyResolution(): void {
-    const { width, height } = parseResolution(this.params.str('system.resolution'));
+  /** Sizes the renderer for the chosen resolution. Unless forced, only when that changed. */
+  private applyResolution(force = true): void {
+    const resolution = this.params.str('system.resolution');
     const scale = this.params.num('system.renderScale');
+    // Every preset load reports a change. Skipping those keeps the frame statistics running.
+    if (!force && `${resolution}@${scale}` === this.appliedResolution) return;
+    this.appliedResolution = `${resolution}@${scale}`;
+    const { width, height } = parseResolution(resolution);
     this.renderer.resize(width, height, scale);
     this.stats.width = width;
     this.stats.height = height;
@@ -242,15 +252,16 @@ export class App {
 
   private async loadImage(file: File): Promise<void> {
     try {
-      // Bitmaps ignore the GL flip flag, so the flip is baked in while decoding.
-      let bitmap = await createImageBitmap(file, { imageOrientation: 'flipY' });
+      // Bitmaps ignore the GL flip and premultiply flags, so both are baked in while decoding.
+      const decode: ImageBitmapOptions = { imageOrientation: 'flipY', premultiplyAlpha: 'premultiply' };
+      let bitmap = await createImageBitmap(file, decode);
       const scale = Math.min(1, MAX_IMAGE_SIZE / Math.max(bitmap.width, bitmap.height));
       if (scale < 1) {
         const width = Math.round(bitmap.width * scale);
         const height = Math.round(bitmap.height * scale);
         bitmap.close();
         bitmap = await createImageBitmap(file, {
-          imageOrientation: 'flipY',
+          ...decode,
           resizeWidth: width,
           resizeHeight: height,
           resizeQuality: 'high',
@@ -266,7 +277,7 @@ export class App {
   // --- presets -----------------------------------------------------------------------------------
 
   private randomize(): void {
-    this.params.randomize(this.rng, (_path, group) => !RANDOMIZE_SKIP.has(group.id));
+    randomizeLook(this.params, this.rng);
     this.header.syncPresets('');
   }
 
@@ -358,6 +369,7 @@ export class App {
       }
       return await exportVideo({
         renderer: this.renderer,
+        cycler: this.cycler,
         params: this.params,
         track,
         settings,
@@ -369,6 +381,7 @@ export class App {
       this.exporting = false;
       this.applyResolution();
       this.renderer.reset();
+      this.cycler.reset();
       this.lastRender = 0;
       if (wasPlaying) this.audio.play();
     }
@@ -424,6 +437,12 @@ export class App {
         case 'KeyE':
           void this.exportDialog.show();
           break;
+        case 'KeyC': {
+          const on = !this.params.bool('cycle.on');
+          this.params.set('cycle.on', on);
+          toast(on ? 'Cycling through looks' : 'Cycle off');
+          break;
+        }
         case 'KeyT':
           this.tapTempo();
           break;
@@ -485,7 +504,7 @@ export class App {
   private restoreState(): void {
     try {
       const raw = storage.get(STATE_KEY);
-      if (raw) this.params.load(JSON.parse(raw) as PresetData, { includeSystem: true });
+      if (raw) this.params.load(upgradePreset(JSON.parse(raw) as PresetData), { includeSystem: true });
     } catch {
       // A corrupt entry is ignored and overwritten on the next change.
     }

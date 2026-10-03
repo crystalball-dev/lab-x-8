@@ -1,5 +1,12 @@
 import type { ParamStore } from '../params/ParamStore';
-import { MOD_SOURCES, type FloatDef, type IntDef, type ModSourceId, type ParamDef } from '../params/types';
+import {
+  MOD_SOURCES,
+  type FloatDef,
+  type IntDef,
+  type ModSourceId,
+  type ParamDef,
+  type ParamValue,
+} from '../params/types';
 import { h, syncRangeFill } from '../util/dom';
 
 /** A generated control for one parameter. */
@@ -72,7 +79,7 @@ function numberRow(params: ParamStore, path: string, def: FloatDef | IntDef): Pa
     params.setMod(path, source === 'none' ? null : { source, amount: depth });
   };
 
-  const refresh = (): void => {
+  const render = (): void => {
     const stored = params.get(path) as number;
     slider.value = String(stored);
     syncRangeFill(slider);
@@ -85,11 +92,22 @@ function numberRow(params: ParamStore, path: string, def: FloatDef | IntDef): Pa
     syncRangeFill(amount);
     amountText.textContent = (mod?.amount ?? 0).toFixed(2);
   };
+  // A preset load refreshes every row. Most values stay the same, and leaving those rows
+  // untouched keeps a look change from costing a frame.
+  let shown = '';
+  const refresh = (): void => {
+    const mod = params.getMod(path);
+    const state = `${String(params.get(path))}|${mod ? `${mod.source}:${mod.amount}` : ''}`;
+    if (state === shown) return;
+    shown = state;
+    render();
+  };
 
   slider.addEventListener('input', () => params.set(path, Number(slider.value)));
   value.addEventListener('change', () => {
     params.set(path, Number(value.value));
-    refresh();
+    // Puts the stored value back into the field, also when typing did not change it.
+    render();
   });
   label.addEventListener('dblclick', () => params.reset(path));
   modButton.addEventListener('click', () => {
@@ -111,7 +129,7 @@ function numberRow(params: ParamStore, path: string, def: FloatDef | IntDef): Pa
   };
 }
 
-function simpleRow(params: ParamStore, path: string, def: ParamDef, control: HTMLElement, refresh: () => void): ParamRow {
+function simpleRow(params: ParamStore, path: string, def: ParamDef, control: HTMLElement, sync: () => void): ParamRow {
   const label = h('label', {
     class: 'row-label',
     text: def.label,
@@ -119,6 +137,13 @@ function simpleRow(params: ParamStore, path: string, def: ParamDef, control: HTM
   });
   label.addEventListener('dblclick', () => params.reset(path));
   control.dataset.path = path;
+  let shown: ParamValue | undefined;
+  const refresh = (): void => {
+    const value = params.get(path);
+    if (value === shown) return;
+    shown = value;
+    sync();
+  };
   refresh();
   return {
     path,
