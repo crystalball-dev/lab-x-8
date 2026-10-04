@@ -8,7 +8,7 @@ const THUMBNAIL_HEIGHT = 64;
  * Decodes a picture file for an image layer, downscaled when it is larger than the renderer
  * takes. Bitmaps ignore the GL flip and premultiply flags, so both are baked in while decoding.
  */
-export async function decodePicture(file: File): Promise<ImageBitmap> {
+export async function decodePicture(file: Blob): Promise<ImageBitmap> {
   const decode: ImageBitmapOptions = { imageOrientation: 'flipY', premultiplyAlpha: 'premultiply' };
   const bitmap = await createImageBitmap(file, decode);
   const scale = Math.min(1, MAX_IMAGE_SIZE / Math.max(bitmap.width, bitmap.height));

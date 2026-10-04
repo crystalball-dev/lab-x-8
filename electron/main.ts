@@ -30,6 +30,7 @@ import { ALLOWED_EXTENSIONS } from '../bridge/codecs';
 import { BRAND } from '../src/brand';
 import { CHANNEL, type ShellInfo } from './channels';
 import { resolvePaths } from './paths';
+import { PictureFolder } from './pictures';
 import { startServer, type AppServer } from './server';
 import { SettingsFile, type WindowState } from './settings';
 
@@ -51,6 +52,8 @@ mkdirSync(paths.dataDir, { recursive: true });
 app.setPath('userData', join(paths.dataDir, 'profile'));
 
 const settings = new SettingsFile(join(paths.dataDir, 'settings.json'));
+/** Copies of the pictures that presets and the session use. */
+const pictures = new PictureFolder(join(paths.dataDir, 'pictures'));
 const bridgeToken = randomBytes(24).toString('hex');
 /** Paths the user picked in a save dialog and that have not been written yet. */
 const approvedPaths = new Set<string>();
@@ -182,6 +185,26 @@ function registerMessages(): void {
 
   ipcMain.on(CHANNEL.openExportFolder, (event) => {
     if (fromApp(event)) openExportFolder();
+  });
+
+  ipcMain.handle(CHANNEL.putPicture, (event, bytes: unknown) => {
+    if (!fromApp(event) || !(bytes instanceof Uint8Array)) return null;
+    try {
+      return pictures.put(bytes);
+    } catch (error) {
+      log('A picture could not be kept.', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle(CHANNEL.getPicture, (event, id: unknown) => {
+    if (!fromApp(event) || typeof id !== 'string') return null;
+    return pictures.get(id);
+  });
+
+  ipcMain.handle(CHANNEL.keepPictures, (event, ids: unknown) => {
+    if (!fromApp(event) || !Array.isArray(ids)) return 0;
+    return pictures.keepOnly(ids.filter((id): id is string => typeof id === 'string'));
   });
 }
 

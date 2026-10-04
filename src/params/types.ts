@@ -114,9 +114,25 @@ export interface ParamGroup {
   optional?: boolean;
 }
 
+/** The picture in an image layer, as a preset remembers it. */
+export interface PresetPicture {
+  /** The kept copy of the picture, named by its content. */
+  id: string;
+  /** The name of the file it came from. */
+  name: string;
+}
+
 export interface PresetData {
   version: 1;
   name?: string;
   values: Record<string, ParamValue>;
   mods?: Record<string, ModRoute>;
+  /**
+   * The pictures, by image layer: `image`, `image2` and so on. A preset with pictures puts
+   * exactly these on screen and empties the other layers. Without them, it leaves the pictures
+   * that are there.
+   */
+  pictures?: Record<string, PresetPicture>;
+  /** In a preset file only: the pictures themselves, base64 encoded, by id. */
+  pictureFiles?: Record<string, string>;
 }

@@ -12,7 +12,7 @@
  * to itself are kept, so rebuilding never loses work.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** "Lab X-8". Names the program, its folder and the folder it keeps its data in. */
@@ -69,6 +69,20 @@ if (process.argv.includes('--zip')) {
       `-DestinationPath '${archive}' -CompressionLevel Optimal"`,
   );
   console.log(`Archive: ${archive}  (${(statSync(archive).size / 1e6).toFixed(0)} MB)`);
+}
+
+// A running copy locks its files. Find that out before deleting anything, or the folder would
+// be left half replaced: Windows lets some of the files go and refuses others.
+const running = join(TARGET, `${productName}.exe`);
+if (existsSync(running)) {
+  try {
+    closeSync(openSync(running, 'r+'));
+  } catch {
+    console.error(`
+${productName} is running from ${TARGET}. Close it, then build again.`);
+    console.error(`The new build is in ${staged}.`);
+    process.exit(1);
+  }
 }
 
 // Replace the program, keep the user's data.

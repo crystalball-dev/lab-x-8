@@ -10,7 +10,7 @@ import { IMAGE_LAYERS } from '../effects/stages';
 import { Renderer, type ImageSource } from '../gfx/Renderer';
 import { PresetManager, upgradePreset } from '../params/presets';
 import { createParamStore, outputSize, randomizeLook } from '../params/schema';
-import type { PresetData } from '../params/types';
+import type { PresetData, PresetPicture } from '../params/types';
 import { publisherLink, wordmark } from '../ui/brand';
 import { ExportDialog, type ExportRequest } from '../ui/ExportDialog';
 import { Header } from '../ui/Header';
@@ -18,12 +18,14 @@ import { Hud, shortGpuName, type HudStats } from '../ui/Hud';
 import { Panel, type LayerPicture } from '../ui/Panel';
 import { mountToasts, toast, toastError } from '../ui/toast';
 import { debounce } from '../util/async';
+import { fromBase64, toBase64 } from '../util/base64';
 import { downloadBlob, h, pickFile, pickFiles } from '../util/dom';
 import { createRng } from '../util/math';
 import { storage } from '../util/storage';
 import { FrameClock } from './FrameClock';
 import { FrameStats } from './FrameStats';
 import { LookCycler } from './LookCycler';
+import { createPictureStore } from './pictureStore';
 import { decodePicture, thumbnail } from './pictures';
 import { createTestCard } from './testCard';
 
@@ -33,10 +35,13 @@ const AUDIO_TYPES = 'audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus';
 const SIZE_SETTINGS = new Set(['system.resolution', 'system.width', 'system.height', 'system.renderScale']);
 const IMAGE_TYPES = 'image/*';
 
-/** A picture in an image layer, and where it came from, to load it again into a new graphics context. */
+/** Stands for the generated test card where a kept picture's id would be. */
+const TEST_CARD = 'test-card';
+
+/** A picture in an image layer. */
 interface LoadedPicture extends LayerPicture {
-  /** The file it was read from, or null for the test card. */
-  file: File | null;
+  /** Its kept copy, TEST_CARD for the test card, or null when it could not be kept. */
+  id: string | null;
 }
 
 /**
@@ -68,6 +73,13 @@ export class App {
   private readonly pictures: Array<LoadedPicture | null> = IMAGE_LAYERS.map(() => null);
   /** Changes whenever a picture is loaded, removed or moved. */
   private pictureRevision = 0;
+  /** Copies of the pictures, so presets and the next session can bring them back. */
+  private readonly store = createPictureStore();
+  /** Settles once the kept pictures have been tidied at startup. Keeping new ones waits for it. */
+  private storeReady: Promise<void> = Promise.resolve();
+  /** Changes with every new set of pictures, so a set still loading gives way to a newer one. */
+  private pictureGeneration = 0;
+  private readonly saveSoon = debounce(() => this.saveState(), 400);
   private appliedResolution = '';
   private exporting = false;
   private contextLost = false;
@@ -87,7 +99,7 @@ export class App {
   };
 
   constructor(root: HTMLElement) {
-    this.restoreState();
+    const restored = this.restoreState();
 
     this.canvas = h('canvas', { attrs: { 'aria-label': `${BRAND.name} output` } });
     this.renderer = this.createRenderer();
@@ -114,18 +126,14 @@ export class App {
       toggleFullscreen: () => this.toggleFullscreen(),
       hidePanel: () => this.togglePanel(),
       randomize: () => this.randomize(),
-      applyPreset: (id) => this.presets.apply(id),
-      savePreset: (name) => {
-        const preset = this.presets.save(name);
-        this.header.syncPresets(preset.id);
-        toast(`Saved preset "${name}"`);
-      },
+      applyPreset: (id) => this.applyPreset(id),
+      savePreset: (name) => this.savePreset(name),
       deletePreset: (id) => {
         this.presets.remove(id);
         this.header.syncPresets('');
       },
       importPreset: () => void this.importPreset(),
-      exportPreset: () => this.exportPreset(),
+      exportPreset: () => void this.exportPreset().catch(toastError),
     });
     this.panel = new Panel(this.params, {
       tapTempo: () => this.tapTempo(),
@@ -155,17 +163,17 @@ export class App {
 
     this.applyResolution();
     this.hud.visible = this.params.bool('system.hud');
-    const saveState = debounce(() => this.saveState(), 400);
     this.params.subscribe((path) => {
       if (path === '*' || SIZE_SETTINGS.has(path)) {
         if (!this.exporting) this.applyResolution(false);
       }
       if (path === '*' || path === 'system.hud') this.hud.visible = this.params.bool('system.hud');
-      saveState();
+      this.saveSoon();
     });
 
     this.bindInput();
     requestAnimationFrame(this.tick);
+    void this.startPictures(restored.state, restored.intact);
   }
 
   // --- frame loop --------------------------------------------------------------------------------
@@ -263,13 +271,14 @@ export class App {
     this.pictureRevision++;
     this.renderer.setImage(layer, image);
     this.panel.rebuild();
+    this.saveSoon();
   }
 
   private useTestCard(layer: number): void {
     const card = createTestCard();
     this.setPicture(
       layer,
-      { name: 'Test card', thumbnail: thumbnail(card, card.width, card.height, false), file: null },
+      { name: 'Test card', thumbnail: thumbnail(card, card.width, card.height, false), id: TEST_CARD },
       { source: card, width: card.width, height: card.height, flipY: true },
     );
   }
@@ -296,6 +305,7 @@ export class App {
     }
     this.pictureRevision++;
     this.panel.showImageLayer(to);
+    this.saveSoon();
   }
 
   /** Puts a copy of an image layer directly above it: the same picture, with the same settings. */
@@ -317,13 +327,9 @@ export class App {
       return;
     }
     const copy = original + 1;
-    if (picture.file) {
-      if (!(await this.loadImage(picture.file, copy))) {
-        toastError(new Error(`"${picture.name}" could not be read again.`));
-        return;
-      }
-    } else {
-      this.useTestCard(copy);
+    if (!(await this.loadKept(picture, copy))) {
+      toastError(new Error(`"${picture.name}" could not be copied.`));
+      return;
     }
     this.params.copyGroup(IMAGE_LAYERS[original]!.id, IMAGE_LAYERS[copy]!.id);
     this.panel.showImageLayer(copy);
@@ -386,7 +392,10 @@ export class App {
     this.panel.showImageLayer(layer);
   }
 
-  /** Loads a picture file into an image layer. Returns false when it cannot be read. */
+  /**
+   * Loads a picture file into an image layer, and keeps a copy of it, so presets and the next
+   * session can bring it back. Returns false when it cannot be read.
+   */
   private async loadImage(file: File, layer: number): Promise<boolean> {
     let bitmap: ImageBitmap;
     try {
@@ -394,42 +403,112 @@ export class App {
     } catch {
       return false;
     }
+    const id = await this.keep(file);
+    if (!id) toastError(new Error(`"${file.name}" could not be kept, so presets will not bring it back.`));
     const { width, height } = bitmap;
     this.setPicture(
       layer,
-      { name: file.name, thumbnail: thumbnail(bitmap, width, height, true), file },
+      { name: file.name, thumbnail: thumbnail(bitmap, width, height, true), id },
       { source: bitmap, width, height, flipY: false },
     );
-    // The graphics card has its own copy now. A new graphics context reads the file again.
+    // The graphics card has its own copy now.
     bitmap.close();
     return true;
+  }
+
+  /** Keeps a copy of a picture file. Resolves with its id, or null when it could not be kept. */
+  private async keep(file: Blob): Promise<string | null> {
+    await this.storeReady;
+    return this.store.put(file).catch(() => null);
+  }
+
+  /**
+   * Loads a kept picture into an image layer. Returns false when it is no longer kept.
+   * @param still  checked once the picture is read, so a newer choice of pictures wins
+   */
+  private async loadKept(picture: PresetPicture | LoadedPicture, layer: number, still = (): boolean => true): Promise<boolean> {
+    if (picture.id === TEST_CARD) {
+      if (still()) this.useTestCard(layer);
+      return true;
+    }
+    if (!picture.id) return false;
+    const blob = await this.store.get(picture.id).catch(() => null);
+    if (!blob) return false;
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await decodePicture(blob);
+    } catch {
+      return false;
+    }
+    if (still()) {
+      const { width, height } = bitmap;
+      this.setPicture(
+        layer,
+        { name: picture.name, thumbnail: thumbnail(bitmap, width, height, true), id: picture.id },
+        { source: bitmap, width, height, flipY: false },
+      );
+    }
+    bitmap.close();
+    return true;
+  }
+
+  /**
+   * Puts a set of pictures on screen, as a preset or the last session had them: each in its
+   * layer, the other layers emptied. A layer that already shows the right picture keeps it.
+   */
+  private async showPictures(pictures: Record<string, PresetPicture>): Promise<void> {
+    const generation = ++this.pictureGeneration;
+    const current = (): boolean => generation === this.pictureGeneration;
+    const missing: string[] = [];
+    for (const [layer, def] of IMAGE_LAYERS.entries()) {
+      const wanted = pictures[def.id];
+      if (!wanted) {
+        if (this.pictures[layer]) this.setPicture(layer, null, null);
+        continue;
+      }
+      if (this.pictures[layer]?.id === wanted.id) continue;
+      if (!(await this.loadKept(wanted, layer, current))) {
+        missing.push(wanted.name);
+        if (current()) this.setPicture(layer, null, null);
+      }
+      if (!current()) return;
+    }
+    if (missing.length > 0) {
+      const more = missing.length > 1 ? ` and ${missing.length - 1} more` : '';
+      toastError(new Error(`The picture "${missing[0]}"${more} is no longer kept. Load ${more ? 'them' : 'it'} again and save the preset.`));
+    }
+  }
+
+  /** The pictures on screen, by image layer, as a preset stores them. None when no layer has one. */
+  private pictureRefs(): Record<string, PresetPicture> | undefined {
+    const refs: Record<string, PresetPicture> = {};
+    this.pictures.forEach((picture, layer) => {
+      if (picture?.id) refs[IMAGE_LAYERS[layer]!.id] = { id: picture.id, name: picture.name };
+    });
+    return Object.keys(refs).length > 0 ? refs : undefined;
   }
 
   /** Loads every picture again into a new renderer, after the graphics context was lost. */
   private async reloadPictures(): Promise<void> {
     for (const [layer, picture] of this.pictures.entries()) {
       if (!picture) continue;
-      if (!picture.file) {
-        const card = createTestCard();
-        this.renderer.setImage(layer, { source: card, width: card.width, height: card.height, flipY: true });
-        continue;
-      }
-      let bitmap: ImageBitmap | null = null;
-      try {
-        bitmap = await decodePicture(picture.file);
-      } catch {
-        // The file has gone since it was loaded.
-      }
-      // Unless the layer has been given another picture in the meantime.
-      if (this.pictures[layer] === picture) {
-        if (bitmap) {
-          this.renderer.setImage(layer, { source: bitmap, width: bitmap.width, height: bitmap.height, flipY: false });
-        } else {
-          this.setPicture(layer, null, null);
-        }
-      }
-      bitmap?.close();
+      const same = (): boolean => this.pictures[layer] === picture;
+      if (!(await this.loadKept(picture, layer, same)) && same()) this.setPicture(layer, null, null);
     }
+  }
+
+  /**
+   * Tidies the kept pictures, keeping those that saved presets and the last session use, then
+   * puts back the pictures that were on screen. Nothing is deleted when the saved presets or the
+   * session could not be read, since they might still need them.
+   */
+  private async startPictures(state: PresetData | null, intact: boolean): Promise<void> {
+    if (intact && this.presets.intact) {
+      const keep = new Set([...this.presets.pictureIds, ...Object.values(state?.pictures ?? {}).map((p) => p.id)]);
+      this.storeReady = this.store.keepOnly(keep).catch(() => undefined);
+      await this.storeReady;
+    }
+    if (state?.pictures) await this.showPictures(state.pictures);
   }
 
   // --- presets -----------------------------------------------------------------------------------
@@ -439,23 +518,67 @@ export class App {
     this.header.syncPresets('');
   }
 
+  /** Applies a preset, with its pictures when it has them. */
+  private applyPreset(id: string): void {
+    const preset = this.presets.apply(id);
+    if (preset?.data.pictures) void this.showPictures(preset.data.pictures);
+  }
+
+  private savePreset(name: string): void {
+    const preset = this.presets.save(name, this.pictureRefs());
+    this.header.syncPresets(preset.id);
+    const count = Object.keys(preset.data.pictures ?? {}).length;
+    toast(`Saved preset "${name}"${count > 0 ? ` with ${count} picture${count === 1 ? '' : 's'}` : ''}`);
+  }
+
   private async importPreset(): Promise<void> {
     const file = await pickFile('application/json,.json');
     if (!file) return;
     try {
       const data = this.presets.importJson(await file.text());
       toast(`Loaded "${data.name ?? file.name}"`);
+      if (data.pictures) await this.showPictures(await this.keepPresetFiles(data));
     } catch (error) {
       toastError(error);
     }
   }
 
-  private exportPreset(): void {
-    const data: PresetData = { ...this.params.snapshot(), name: `${BRAND.name} preset` };
-    downloadBlob(
-      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
-      `${BRAND.slug}-preset.json`,
-    );
+  /**
+   * Keeps the pictures carried in a preset file. Returns the preset's pictures, under the ids
+   * they are now kept by.
+   */
+  private async keepPresetFiles(data: PresetData): Promise<Record<string, PresetPicture>> {
+    const kept = new Map<string, string>();
+    for (const [id, base64] of Object.entries(data.pictureFiles ?? {})) {
+      const bytes = fromBase64(base64);
+      const keptId = await this.keep(new Blob([bytes]));
+      if (keptId) kept.set(id, keptId);
+    }
+    const pictures: Record<string, PresetPicture> = {};
+    for (const [layer, picture] of Object.entries(data.pictures ?? {})) {
+      pictures[layer] = { ...picture, id: kept.get(picture.id) ?? picture.id };
+    }
+    return pictures;
+  }
+
+  /** The current look as a preset file, with its pictures inside, so it can be moved or kept. */
+  async presetFile(name = `${BRAND.name} preset`): Promise<string> {
+    const pictures = this.pictureRefs();
+    const data: PresetData = { ...this.params.snapshot(), name, ...(pictures ? { pictures } : {}) };
+    if (pictures) {
+      data.pictureFiles = {};
+      for (const { id } of Object.values(pictures)) {
+        if (id === TEST_CARD || data.pictureFiles[id]) continue;
+        const blob = await this.store.get(id);
+        if (blob) data.pictureFiles[id] = await toBase64(blob);
+      }
+    }
+    return JSON.stringify(data, null, 2);
+  }
+
+  private async exportPreset(): Promise<void> {
+    const text = await this.presetFile();
+    downloadBlob(new Blob([text], { type: 'application/json' }), `${BRAND.slug}-preset.json`);
   }
 
   private stepPreset(direction: number): void {
@@ -463,7 +586,7 @@ export class App {
     if (all.length === 0) return;
     this.presetIndex = (this.presetIndex + direction + all.length) % all.length;
     const preset = all[this.presetIndex]!;
-    this.presets.apply(preset.id);
+    this.applyPreset(preset.id);
     this.header.syncPresets(preset.id);
     toast(preset.name);
   }
@@ -655,16 +778,26 @@ export class App {
 
   // --- persistence -------------------------------------------------------------------------------
 
+  /** Remembers the look and the pictures on screen for the next session. */
   private saveState(): void {
-    storage.set(STATE_KEY, JSON.stringify(this.params.snapshot({ includeSystem: true })));
+    const state: PresetData = { ...this.params.snapshot({ includeSystem: true }), pictures: this.pictureRefs() ?? {} };
+    storage.set(STATE_KEY, JSON.stringify(state));
   }
 
-  private restoreState(): void {
+  /**
+   * Restores the look of the last session. Its pictures follow once the app is running.
+   * @returns the stored session, and whether it could be read
+   */
+  private restoreState(): { state: PresetData | null; intact: boolean } {
+    const raw = storage.get(STATE_KEY);
+    if (!raw) return { state: null, intact: true };
     try {
-      const raw = storage.get(STATE_KEY);
-      if (raw) this.params.load(upgradePreset(JSON.parse(raw) as PresetData), { includeSystem: true });
+      const state = JSON.parse(raw) as PresetData;
+      this.params.load(upgradePreset(state), { includeSystem: true });
+      return { state, intact: true };
     } catch {
       // A corrupt entry is ignored and overwritten on the next change.
+      return { state: null, intact: false };
     }
   }
 }

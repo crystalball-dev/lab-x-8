@@ -275,6 +275,17 @@ at its defaults is stored as its first value alone, which is enough for `load()`
 preset covers it, so twenty image layers do not bloat every preset. `swapGroups` and
 `copyGroup` move and duplicate a layer's settings, for moving layers in the drawing order.
 
+A preset saved with pictures lists them by image layer in `pictures`: the id of each picture's
+kept copy and the name of its file. The ids come from the picture store (`app/pictureStore.ts`):
+the SHA-256 of the file's bytes plus the extension of its type, which is read from the bytes
+(`util/pictureFiles.ts`). The same picture always gets the same id, and an id can only name a
+file in the store. In the desktop app the shell keeps the files in `pictures/` in the data folder
+(`electron/pictures.ts`), reached through three messages that answer only the app's own page.
+In a browser they are kept in IndexedDB. The session state lists the pictures on screen the same
+way, so the app starts with them. At startup every kept picture that no saved preset and not the
+session uses is deleted, unless the presets or the session could not be read. An exported preset
+file carries the pictures themselves in `pictureFiles`, base64 encoded by id.
+
 `upgradePreset` in `presets.ts` brings data from older versions up to date before it is
 applied. Presets from before the image could be laid on top keep it in the scene, without the
 newer glow, shadow and tearing, so they still look the way they did when they were saved.
@@ -423,6 +434,7 @@ Its shader reads the previous stage from `u_input`.
 | `tests/analysis.test.ts` | FFT calibration, band mapping, onsets, beat clock, repeatability of the analysis |
 | `tests/params.test.ts` | Validation, modulation, presets, optional groups, upgrading old presets, image layers, palettes |
 | `tests/imageReach.test.ts` | The part of the screen an image layer can change, for every fit, effect and position |
+| `tests/pictures.test.ts` | Picture types from their bytes, the picture folder's names, reads and clean-up, presets with pictures |
 | `tests/cycle.test.ts` | Cycle schedule, shuffled order without repeats, the cycle playing through and after a jump |
 | `tests/export.test.ts` | Frame count and timing, identical inputs on every run, beat grid, cancelling |
 | `tests/frameStats.test.ts` | Frame rate and late-frame measurement |

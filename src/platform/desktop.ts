@@ -29,6 +29,16 @@ export interface DesktopApi {
   /** Reveals an exported file in the file manager. */
   showInFolder(path: string): void;
   openExportFolder(): void;
+
+  /**
+   * Keeps a copy of a picture file in the data folder.
+   * @returns its id, or null when it is not a picture or too large
+   */
+  putPicture(bytes: Uint8Array): Promise<string | null>;
+  /** A kept picture, or null when there is none by that id. */
+  getPicture(id: string): Promise<Uint8Array<ArrayBuffer> | null>;
+  /** Deletes every kept picture not in `ids`. Resolves with how many went. */
+  keepPictures(ids: string[]): Promise<number>;
 }
 
 function find(): DesktopApi | null {

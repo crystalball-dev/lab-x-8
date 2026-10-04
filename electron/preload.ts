@@ -27,6 +27,9 @@ const api: DesktopApi = {
     ipcRenderer.invoke(CHANNEL.chooseExportFile, String(suggestedName)) as Promise<string | null>,
   showInFolder: (path) => ipcRenderer.send(CHANNEL.showInFolder, String(path)),
   openExportFolder: () => ipcRenderer.send(CHANNEL.openExportFolder),
+  putPicture: (bytes) => ipcRenderer.invoke(CHANNEL.putPicture, bytes) as Promise<string | null>,
+  getPicture: (id) => ipcRenderer.invoke(CHANNEL.getPicture, String(id)) as Promise<Uint8Array<ArrayBuffer> | null>,
+  keepPictures: (ids) => ipcRenderer.invoke(CHANNEL.keepPictures, ids.map(String)) as Promise<number>,
 };
 
 contextBridge.exposeInMainWorld('desktop', api);

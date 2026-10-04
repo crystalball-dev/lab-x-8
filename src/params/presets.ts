@@ -1,7 +1,7 @@
 import { BRAND } from '../brand';
 import { storage } from '../util/storage';
 import type { ParamStore } from './ParamStore';
-import type { PresetData } from './types';
+import type { PresetData, PresetPicture } from './types';
 
 const STORAGE_KEY = 'lab-x-8.presets.v1';
 
@@ -208,6 +208,8 @@ function slug(name: string): string {
 export class PresetManager {
   private user: Preset[] = [];
   private revision = 0;
+  /** False when stored presets could not be read, so nothing may be cleaned up on their account. */
+  readonly intact: boolean = true;
   private readonly builtIn: Preset[] = BUILT_IN.map((p) => ({
     id: `builtin:${slug(p.name)}`,
     name: p.name,
@@ -221,9 +223,11 @@ export class PresetManager {
       if (raw) {
         const parsed = JSON.parse(raw) as Preset[];
         if (Array.isArray(parsed)) this.user = parsed.filter((p) => p && p.data && p.name);
+        else this.intact = false;
       }
     } catch {
       this.user = [];
+      this.intact = false;
     }
   }
 
@@ -240,21 +244,24 @@ export class PresetManager {
     return this.all.find((p) => p.id === id);
   }
 
-  apply(id: string): boolean {
+  /** Applies a preset's settings. Returns the preset, whose pictures are the caller's to show. */
+  apply(id: string): Preset | undefined {
     const preset = this.find(id);
-    if (!preset) return false;
-    this.params.load(upgradePreset(preset.data));
-    return true;
+    if (preset) this.params.load(upgradePreset(preset.data));
+    return preset;
   }
 
-  /** Saves the current look under the given name, replacing a user preset of the same name. */
-  save(name: string): Preset {
+  /**
+   * Saves the current look under the given name, replacing a user preset of the same name.
+   * @param pictures  the pictures on screen, by image layer, when there are any
+   */
+  save(name: string, pictures?: Record<string, PresetPicture>): Preset {
     const id = `user:${slug(name)}`;
     const preset: Preset = {
       id,
       name,
       builtIn: false,
-      data: { ...this.params.snapshot(), name },
+      data: { ...this.params.snapshot(), name, ...(pictures ? { pictures } : {}) },
     };
     this.user = [...this.user.filter((p) => p.id !== id), preset];
     this.persist();
@@ -266,7 +273,15 @@ export class PresetManager {
     this.persist();
   }
 
-  /** Validates and applies preset JSON from a file. */
+  /** The kept pictures that saved presets use. */
+  get pictureIds(): Set<string> {
+    return new Set(this.user.flatMap((preset) => Object.values(preset.data.pictures ?? {}).map((p) => p.id)));
+  }
+
+  /**
+   * Validates and applies preset JSON from a file. Returns its data, whose pictures are the
+   * caller's to keep and show.
+   */
   importJson(text: string): PresetData {
     const data = JSON.parse(text) as PresetData;
     if (!data || typeof data !== 'object' || typeof data.values !== 'object') {

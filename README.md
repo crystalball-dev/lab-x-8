@@ -38,6 +38,7 @@ another machine or a USB stick.
 | What | Where |
 | --- | --- |
 | Settings and presets | `Lab X-8 Data/settings.json`, next to the program |
+| Pictures of presets and of the last session | `Lab X-8 Data/pictures/`, next to the program |
 | Exported video | `Exports/`, next to the program, or any place you choose when exporting |
 | FFmpeg | `resources/ffmpeg/`, inside the program |
 
@@ -215,15 +216,20 @@ What makes the picture part of the show rather than a sticker on it:
 **Position X** and **Position Y** move it, for example into a corner as a watermark. For a logo
 on a black background choose the blend **Screen**, for one on white **Multiply**.
 
-A preset you save stores the settings of every image layer with the look, including which
-layers are visible, so a cycle of your own looks can show different pictures in each. A layer
-still at its starting settings takes a single entry in the preset. The built-in looks store no
-image settings, so switching between them leaves the pictures where you put them. The pictures
-themselves are not stored, only their settings.
+A preset you save keeps its pictures. Loading it puts each picture back into its layer, with
+the settings it had, and empties the other layers. The app keeps a copy of every picture you
+load in `Lab X-8 Data/pictures`, so a preset still has its pictures when the original files
+are moved, renamed or deleted. A picture used by several presets is kept once. The copies that
+no preset and no session use any more are deleted the next time the app starts.
 
-Pictures larger than 4096 pixels on either side are scaled down when they load. The app keeps
-no copy of them beyond the one on the graphics card. If the graphics driver resets, it reads
-the files again.
+The app also starts with the pictures that were on screen when it was closed.
+
+A preset saved with no pictures loaded, such as a built-in look, leaves the pictures on screen
+alone and only changes their settings if it has some. The look cycle changes settings only:
+the pictures on screen stay while it plays your presets.
+
+Pictures larger than 4096 pixels on either side are scaled down when they load. The kept copy
+is the original file.
 
 A picture can also be mapped onto the tunnel walls: choose the pattern "Image walls" in the
 Tunnel generator. The walls show the lowest layer that holds a picture.
@@ -242,9 +248,12 @@ The sensitivity of each frequency band is set in **Audio input**.
 ### Presets
 
 Seven built-in looks, plus your own. **Random** (or `R`) rolls a new look. **Export preset**
-and **Import preset** move looks between machines as JSON files. Presets store the look only.
-Tempo, input sensitivity and display settings are left alone. A preset without image settings,
-such as a built-in look, leaves the image alone too.
+and **Import preset** move looks between machines as JSON files. An exported preset carries its
+pictures inside, so the file is all another machine needs, and it is as large as the pictures.
+Importing one shows the look with its pictures. Save it to keep it among your presets.
+
+Presets store the look only. Tempo, input sensitivity and display settings are left alone. A
+preset without image settings, such as a built-in look, leaves the pictures alone too.
 
 ### Cycling through looks
 
