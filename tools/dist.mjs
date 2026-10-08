@@ -63,11 +63,11 @@ rmSync(join(RELEASE, 'builder-debug.yml'), { force: true });
 if (process.argv.includes('--zip')) {
   const archive = join(RELEASE, `${fileStem}-portable.zip`);
   rmSync(archive, { force: true });
-  // Made from the fresh build, before it meets this machine's settings and exports.
-  run(
-    `powershell -NoProfile -Command "Compress-Archive -LiteralPath '${staged}' ` +
-      `-DestinationPath '${archive}' -CompressionLevel Optimal"`,
-  );
+  // Made from the fresh build, before it meets this machine's settings and exports. Windows' own
+  // tar writes a standard zip. PowerShell's Compress-Archive separates folders with backslashes,
+  // which only Windows unpacks without complaint.
+  const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+  run(`"${tar}" -a -c -f "${archive}" -C "${STAGE}" "${productName}"`);
   console.log(`Archive: ${archive}  (${(statSync(archive).size / 1e6).toFixed(0)} MB)`);
 }
 

@@ -26,6 +26,11 @@ Bottom: Signal Loss, Clean Geometry, Acid Mandala.
 
 ## Desktop application
 
+**Download:** the latest build for Windows is on the
+[Releases page](https://github.com/crystalball-dev/lab-x-8/releases/latest). Unzip it anywhere
+and run `Lab X-8/Lab X-8.exe`. The app is not code signed, so Windows may warn about an unknown
+publisher the first time: choose **More info**, then **Run anyway**.
+
 The portable build is a folder. It needs nothing installed: no Node, no browser, no FFmpeg.
 
 ```

@@ -35,7 +35,9 @@ if (version.status !== 0) {
   console.warn(`${source} does not run. The app will be packaged without FFmpeg.`);
   process.exit(0);
 }
-const banner = version.stdout.split(/\r?\n/)[0].trim();
+const lines = version.stdout.split(/\r?\n/);
+const banner = lines[0].trim();
+const configuration = lines.find((line) => line.startsWith('configuration:'))?.trim();
 
 mkdirSync(target, { recursive: true });
 copyFileSync(source, join(target, name));
@@ -48,7 +50,7 @@ if (check.status !== 0) {
 }
 
 // FFmpeg comes with a licence that has to travel with it.
-let licence = 'not found next to the program';
+let licence = null;
 for (const folder of [dirname(source), dirname(dirname(source))]) {
   const file = join(folder, 'LICENSE');
   if (existsSync(file)) {
@@ -57,19 +59,28 @@ for (const folder of [dirname(source), dirname(dirname(source))]) {
     break;
   }
 }
+if (!licence) console.warn("FFmpeg's licence was not found next to it. Add LICENSE.txt before handing the app on.");
 
+// This file ships with the app, so it names the build and where its source is, and says nothing
+// about the machine it was built on.
+const release = /ffmpeg version (\d+\.\d+(?:\.\d+)?)\b/.exec(banner)?.[1];
 writeFileSync(
   join(target, 'ABOUT.txt'),
   [
     `FFmpeg, bundled with ${productName} for video export.`,
     '',
     banner,
-    `Copied from: ${source}`,
-    `Licence:     ${licence}`,
+    ...(configuration ? [configuration] : []),
     '',
-    'FFmpeg is a separate program under its own licence (see LICENSE.txt).',
+    'FFmpeg is a separate program under its own licence, which is in LICENSE.txt.',
     `${productName} starts it as a separate process and does not link against it.`,
-    'Source code: https://ffmpeg.org/download.html',
+    '',
+    'Source code:',
+    ...(release ? [`  FFmpeg ${release}: https://ffmpeg.org/releases/ffmpeg-${release}.tar.xz`] : []),
+    '  All releases: https://ffmpeg.org/download.html',
+    ...(banner.includes('gyan.dev')
+      ? ['  This build and the versions of the libraries in it: https://www.gyan.dev/ffmpeg/builds/']
+      : []),
     '',
   ].join('\n'),
 );
